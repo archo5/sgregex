@@ -84,7 +84,7 @@ void* testmemfunc2( void* ud, void* ptr, size_t sz )
 	if( col > 35 ) col = 0; else col = 35 - col; \
 	R = srx_CreateExt( pat, "", err, testmemfunc2, NULL ); \
 	printf( "%*s output code: %d, position %d", col, "", err[0], err[1] ); \
-	if( R ){ printf( ", match: %s\n", srx_Match( R, str ) ? "TRUE" : "FALSE" ); } else puts(""); \
+	if( R ){ printf( ", match: %s\n", srx_Match( R, str, 0 ) ? "TRUE" : "FALSE" ); } else puts(""); \
 	if( R && ( flags & TEST_DUMP ) ){ srx_DumpToStdout( R ); puts(""); } \
 	srx_Destroy( R ); \
 	assert( memusage == 0 );

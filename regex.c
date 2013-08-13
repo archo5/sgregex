@@ -678,13 +678,15 @@ void srx_DumpToStdout( srx_Context* R )
 /*
 	#### srx_Match ####
 */
-int srx_Match( srx_Context* R, const RX_Char* str )
+int srx_Match( srx_Context* R, const RX_Char* str, int offset )
 {
+	int ret;
 	match_ctx ctx = { str, R->root, R };
 	R->string = str;
+	str += offset;
 	while( *str )
 	{
-		int ret = regex_test( str, &ctx );
+		ret = regex_test( str, &ctx );
 		if( ret < 0 )
 			return 0;
 		if( ret > 0 )

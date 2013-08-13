@@ -1,0 +1,95 @@
+--- SGRegex [SRX] regular expression library v0.9b ---
+
+Simple and fully featured regular expression library with a minimalistic implementation in C.
+
+usage:
+- add regex.h and regex.c to your project
+
+support:
+- "." (dot)
+- "*", "+", "?" (simple multipliers)
+- "{<num>}", "{<num1>,<num2>}" (complex multipliers)
+- "[...]", "[^...]" (character classes)
+- "(...)" (subexpressions/capture ranges)
+- "|" (the "or" operator)
+- "^", "$" (beginning/end matchers)
+- modifier "m" - multiline (!TODO)
+- modifier "i" - case insensitive matcing (!TODO)
+- modifier "s" - dot includes newlines
+
+API documentation:
+
+> function srx_Create
+(
+	const RX_Char* regex, // the regular expression
+	const RX_Char* mods // modifier char list
+)
+- creates a regular expression matcher from the specified expression and modifier list
+- returns the regular expression matcher ("context")
+
+> function srx_CreateExt
+(
+	const RX_Char* regex, // the regular expression
+	const RX_Char* mods, // modifier char list
+	int* errnpos, // pointer to an array of *two* int values: error code and error position (optional)
+	srx_MemFunc memfn, // memory allocation function (optional, pass srx_DefaultMemFunc for default)
+	void* memctx // user pointer to pass to the allocation function
+);
+- creates a regular expression matcher from the specified expression and modifier list
+- allows to specify custom memory allocation and error output
+- returns the regular expression matcher ("context")
+
+> function srx_Destroy
+(
+	srx_Context* R // the regex matcher context
+)
+- destroys the created matcher object
+
+> function srx_DumpToStdout
+(
+	srx_Context* R // the regex matcher context
+)
+- dumps the structure of the context to standard output
+
+> function srx_Match
+(
+	srx_Context* R, // the regex matcher context
+	const RX_Char* str, // the string to use for matching
+	int offset // the starting point for matching
+)
+- searches for a match through the string
+- offset is not "approached safely" (with a loop to check for a NUL-byte)
+- returns whether a match was found
+
+> function srx_GetCaptureCount
+(
+	srx_Context* R // the regex matcher context
+)
+- returns the number of capture ranges that were found in the expression (there's always at least one - the whole match)
+- the current upper limit is 10 (including the whole match)
+
+> function srx_GetCaptured
+(
+	srx_Context* R, // the regex matcher context
+	int which, // the capture range number
+	int* pbeg, // pointer to output for start offset (optional)
+	int* pend // pointer to output for end offset (optional)
+)
+- retrieves the offsets from the specified capture range
+- returns if the capture range number is in range and if the last match included the capture range (which also means that data was written to specified pointers)
+
+> function srx_GetCapturedPtrs
+(
+	srx_Context* R, // the regex matcher context
+	int which, // the capture range number
+	const RX_Char** pbeg, // pointer to output for start offset pointer (optional)
+	const RX_Char** pend // pointer to output for end offset pointer (optional)
+)
+- retrieves the offset pointers from the specified capture range
+- returns if the capture range number is in range and if the last match included the capture range (which also means that data was written to specified pointers)
+
+
+
+credits:
+- created by Arvīds Kokins (snake5)
+

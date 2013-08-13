@@ -50,7 +50,7 @@ srx_Context* srx_CreateExt( const RX_Char* str, const RX_Char* mods, int* errnpo
 int srx_Destroy( srx_Context* R );
 void srx_DumpToStdout( srx_Context* R );
 
-int srx_Match( srx_Context* R, const RX_Char* str );
+int srx_Match( srx_Context* R, const RX_Char* str, int offset );
 int srx_GetCaptureCount( srx_Context* R );
 int srx_GetCaptured( srx_Context* R, int which, int* pbeg, int* pend );
 int srx_GetCapturedPtrs( srx_Context* R, int which, const RX_Char** pbeg, const RX_Char** pend );
