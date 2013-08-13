@@ -140,10 +140,8 @@ int main( int argc, char* argv[] )
 	MATCHTEST( "a cat", ".*" );
 	MATCHTEST( "a cat", ".*?" );
 	MATCHTEST( "<tag> b <tag>", "<([a-z]{1,5})>.*?<\\1>" );
-//	MATCHTEST( "<tag> b <tag>", "[a-z]+" );
-//	MATCHTEST( "<tag> b <tag>", "([a-z]+)" );
-//	MATCHTEST( "<tag> b <tag>", "<([a-z]+)>" );
-//	MATCHTEST( "<tag> b <tag>", "<([a-z]+)>.*?<\\1>" );
+	MATCHTEST( "<tag> b <tag>", "[a-z]+" );
+	MATCHTEST( "<tag>some text</tag>", "<([a-z]+)>.*?</\\1>" );
 	
 	return 0;
 }

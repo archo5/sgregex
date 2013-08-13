@@ -170,13 +170,8 @@ static int regex_match_many( match_ctx* ctx )
 				return i >= item->min && i <= item->max;
 			if( !regex_match_once( ctx ) )
 			{
-				if( i >= item->min && i <= item->max )
-				{
-					item->counter = item->flags & RIF_LAZY ? item->max : i;
-					return 1;
-				}
-				else
-					return 0;
+				item->counter = item->flags & RIF_LAZY ? item->max : i;
+				return i >= item->min && i <= item->max;
 			}
 		}
 		return 1;
