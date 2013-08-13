@@ -6,9 +6,10 @@
 #include <limits.h>
 
 
-#define srx_Item regex_item
-#define _srx_Item _regex_item
 #include "regex.h"
+
+
+#define RX_MAX_CAPTURES 10
 
 
 #define RX_MALLOC( bytes ) R->memfn( R->memctx, NULL, bytes )
@@ -33,6 +34,7 @@
 #define RCF_DOTALL    0x04 /* "." is compiled as "[^]" instead of "[^\r\n]" */
 
 
+typedef struct _regex_item regex_item;
 struct _regex_item
 {
 	/* structure */
@@ -52,11 +54,36 @@ struct _regex_item
 	int counter;
 };
 
+struct _srx_Context
+{
+	/* structure */
+	regex_item*    root;
+	
+	/* memory */
+	srx_MemFunc    memfn;
+	void*          memctx;
+	
+	/* captures */
+	regex_item*    caps[ RX_MAX_CAPTURES ];
+	int            numcaps;
+	
+	/* temporary data */
+	const RX_Char* string;
+};
 
-static int regex_test( const RX_Char* str, srx_Context* ctx );
+typedef struct _match_ctx
+{
+	const RX_Char* string;
+	regex_item*    item;
+	srx_Context*   R;
+}
+match_ctx;
 
 
-static int regex_match_once( srx_Context* ctx )
+static int regex_test( const RX_Char* str, match_ctx* ctx );
+
+
+static int regex_match_once( match_ctx* ctx )
 {
 	int i;
 	regex_item* item = ctx->item;
@@ -64,22 +91,44 @@ static int regex_match_once( srx_Context* ctx )
 	switch( item->type )
 	{
 	case RIT_MATCH:
-		if( *str == item->a ) return 1;
+		if( *str == item->a )
+		{
+			item->matchend++;
+			return 1;
+		}
 		break;
 	case RIT_RANGE:
-		for( i = 0; i < item->count*2; i += 2 )
 		{
-			if( *str >= item->range[i] && *str <= item->range[i+1] )
-				return 1;
+			int inv = ( item->flags & RIF_INVERT ) != 0;
+			for( i = 0; i < item->count*2; i += 2 )
+			{
+				if( ( *str >= item->range[i] && *str <= item->range[i+1] ) ^ inv )
+				{
+					item->matchend++;
+					return 1;
+				}
+			}
 		}
 		break;
 	case RIT_SPCBEG:
 		return ctx->string == item->matchend;
 	case RIT_SPCEND:
 		return !*str;
+	case RIT_BKREF:
+		{
+			regex_item* cap = ctx->R->caps[ item->a ];
+			int len = cap->matchend - cap->matchbeg;
+			int len2 = strlen( str );
+			if( len2 >= len && strncmp( cap->matchbeg, str, len ) == 0 )
+			{
+				item->matchend += len;
+				return 1;
+			}
+		}
+		break;
 	case RIT_SUBEXP:
 		{
-			srx_Context cc = { ctx->string, item->ch };
+			match_ctx cc = { ctx->string, item->ch, ctx->R };
 			if( regex_test( str, &cc ) )
 			{
 				regex_item* p = item->ch;
@@ -94,41 +143,47 @@ static int regex_match_once( srx_Context* ctx )
 	return 0;
 }
 
-static int regex_match_many( srx_Context* ctx )
+static int regex_match_many( match_ctx* ctx )
 {
 	regex_item* item = ctx->item;
-	int i, inv = ( item->flags & RIF_INVERT ) != 0;
 	item->matchend = item->matchbeg;
 	if( item->type == RIT_EITHER )
 	{
 		regex_item* chi = item->counter ? item->ch2 : item->ch;
-		srx_Context cc = { ctx->string, chi };
+		match_ctx cc = { ctx->string, chi, ctx->R };
 		if( regex_test( item->matchbeg, &cc ) )
 		{
 			regex_item* p = chi;
 			while( p->next )
 				p = p->next;
 			item->matchend = p->matchend;
-			return !inv;
+			return 1;
 		}
-		return inv;
+		return 0;
 	}
 	else
 	{
+		int i;
 		for( i = 0; i < item->counter; ++i )
 		{
-			if( !*item->matchend )
-				break;
+			if( !*item->matchend && item->type != RIT_SPCEND )
+				return i >= item->min && i <= item->max;
 			if( !regex_match_once( ctx ) )
-				return inv;
-			if( item->type == RIT_MATCH || item->type == RIT_RANGE )
-				item->matchend++;
+			{
+				if( i >= item->min && i <= item->max )
+				{
+					item->counter = item->flags & RIF_LAZY ? item->max : i;
+					return 1;
+				}
+				else
+					return 0;
+			}
 		}
+		return 1;
 	}
-	return !inv;
 }
 
-static int regex_test( const RX_Char* str, srx_Context* ctx )
+static int regex_test( const RX_Char* str, match_ctx* ctx )
 {
 	regex_item* p = ctx->item;
 	p->matchbeg = str;
@@ -136,7 +191,7 @@ static int regex_test( const RX_Char* str, srx_Context* ctx )
 	
 	for(;;)
 	{
-		srx_Context cc = { ctx->string, p };
+		match_ctx cc = { ctx->string, p, ctx->R };
 		int res = regex_match_many( &cc );
 		if( res < 0 )
 			return -1;
@@ -169,20 +224,6 @@ static int regex_test( const RX_Char* str, srx_Context* ctx )
 			if( !p )
 				return 0;
 		}
-	}
-}
-
-static int regex_scan( const RX_Char* str, regex_item* item )
-{
-	srx_Context ctx = { str, item };
-	for(;;)
-	{
-		int ret = regex_test( str, &ctx );
-		if( ret < 0 )
-			return 0;
-		if( ret > 0 )
-			return 1;
-		str++;
 	}
 }
 
@@ -235,7 +276,39 @@ static void regex_free_item( srx_Context* R, regex_item* item )
 	regex_dealloc_item( R, item );
 }
 
-static int regex_real_compile( srx_Context* R, const RX_Char** pstr, int sub, int modflags, regex_item** out )
+static void regex_level( regex_item** pitem )
+{
+	/* TODO: balanced/non-(pseudo-)binary leveling */
+	regex_item* item = *pitem;
+	while( item )
+	{
+		if( item->type == RIT_EITHER )
+		{
+			regex_item* next = item->next;
+			regex_level( &next );
+			
+			if( item->prev )
+			{
+				item->prev->next = NULL;
+				item->prev = NULL;
+			}
+			if( item->next )
+			{
+				item->next->prev = NULL;
+				item->next = NULL;
+			}
+			
+			item->ch = *pitem;
+			item->ch2 = next;
+			
+			*pitem = item;
+			return;
+		}
+		item = item->next;
+	}
+}
+
+static int regex_real_compile( srx_Context* R, int* cel, const RX_Char** pstr, int sub, int modflags, regex_item** out )
 {
 #define _RX_ALLOC_NODE( ty ) \
 	item = RX_ALLOC( regex_item ); \
@@ -323,14 +396,21 @@ static int regex_real_compile( srx_Context* R, const RX_Char** pstr, int sub, in
 			_RXE( RXEUNEXP );
 		case '(':
 			{
-				int r;
+				int r, cap = R->numcaps < RX_MAX_CAPTURES ? 1 : -1;
 				_RX_ALLOC_NODE( RIT_SUBEXP );
+				if( cap >= 0 )
+				{
+					cap = R->numcaps++;
+					R->caps[ cap ] = item;
+				}
 				s++;
-				r = regex_real_compile( R, &s, 1, modflags, &item->ch );
+				r = regex_real_compile( R, cel, &s, 1, modflags, &item->ch );
 				if( r )
 					_RXE( r );
 				if( *s != ')' )
 					_RXE( RXEUNEXP );
+				if( cap >= 0 )
+					cel[ cap ] = 1;
 				s++;
 			}
 			break;
@@ -365,26 +445,31 @@ static int regex_real_compile( srx_Context* R, const RX_Char** pstr, int sub, in
 					}
 					if( isdigit( *s ) && ctr == 0 )
 						_RXE( RXELIMIT );
-					if( *s != ',' || !isdigit(s[1]) )
-						_RXE( RXEUNEXP );
-					s++;
-					max = 0;
-					ctr = 8;
-					while( isdigit( *s ) && ctr > 0 )
+					if( *s == ',' )
 					{
-						max = max * 10 + *s++ - '0';
-						ctr--;
+						if( !isdigit(s[1]) )
+							_RXE( RXEUNEXP );
+						s++;
+						max = 0;
+						ctr = 8;
+						while( isdigit( *s ) && ctr > 0 )
+						{
+							max = max * 10 + *s++ - '0';
+							ctr--;
+						}
+						if( isdigit( *s ) && ctr == 0 )
+							_RXE( RXELIMIT );
+						if( min > max )
+							_RXE( RXERANGE );
 					}
-					if( isdigit( *s ) && ctr == 0 )
-						_RXE( RXELIMIT );
-					if( min > max )
-						_RXE( RXERANGE );
+					else
+						max = min;
 					if( *s != '}' )
 						_RXE( RXEUNEXP );
 				}
 				else if( *s == '?' ){ min = 0; max = 1; }
-				else if( *s == '*' ){ min = 0; max = INT_MAX; }
-				else if( *s == '+' ){ min = 1; max = INT_MAX; }
+				else if( *s == '*' ){ min = 0; max = INT_MAX - 1; }
+				else if( *s == '+' ){ min = 1; max = INT_MAX - 1; }
 				item->min = min;
 				item->max = max;
 			}
@@ -395,6 +480,8 @@ static int regex_real_compile( srx_Context* R, const RX_Char** pstr, int sub, in
 		case '}':
 			_RXE( RXEUNEXP );
 		case '|':
+			if( !citem )
+				_RXE( RXEUNEXP );
 			_RX_ALLOC_NODE( RIT_EITHER );
 			s++;
 			break;
@@ -418,8 +505,12 @@ static int regex_real_compile( srx_Context* R, const RX_Char** pstr, int sub, in
 				}
 				else if( isdigit( *s ) )
 				{
+					int dig = *s++ - '0';
+					if( dig == 0 || dig >= RX_MAX_CAPTURES || !cel[ dig ] )
+						_RXE( RXENOREF );
 					_RX_ALLOC_NODE( RIT_BKREF );
-					item->a = *s++ - '0';
+					item->a = dig;
+					break;
 				}
 				/* TODO: character classes */
 			}
@@ -448,9 +539,14 @@ static int regex_real_compile( srx_Context* R, const RX_Char** pstr, int sub, in
 		}
 		citem = item;
 	}
+	if( !item )
+		_RXE( RXEEMPTY );
+	if( item->type == RIT_EITHER )
+		_RXE( RXEPART );
 	*pstr = s;
 	while( item->prev )
 		item = item->prev;
+	regex_level( &item );
 	*out = item;
 	return RXSUCCESS;
 fail:
@@ -463,7 +559,7 @@ fail:
 */
 srx_Context* srx_CreateExt( const RX_Char* str, const RX_Char* mods, int* errnpos, srx_MemFunc memfn, void* memctx )
 {
-	int flags = 0, err;
+	int flags = 0, err, cel[ RX_MAX_CAPTURES ];
 	srx_Context* R = NULL;
 	while( *mods )
 	{
@@ -481,16 +577,22 @@ srx_Context* srx_CreateExt( const RX_Char* str, const RX_Char* mods, int* errnpo
 	
 	R = (srx_Context*) memfn( memctx, NULL, sizeof(srx_Context) );
 	memset( R, 0, sizeof(*R) );
+	memset( cel, 0, sizeof(cel) );
 	R->memfn = memfn;
 	R->memctx = memctx;
 	R->string = str;
+	R->numcaps = 1;
 	
-	err = regex_real_compile( R, &str, 0, flags, &R->item );
+	err = regex_real_compile( R, cel, &str, 0, flags, &R->root );
 	
 	if( err )
 	{
 		memfn( memctx, R, 0 );
 		R = NULL;
+	}
+	else
+	{
+		R->caps[ 0 ] = R->root;
 	}
 fail:
 	if( errnpos )
@@ -510,8 +612,8 @@ int srx_Destroy( srx_Context* R )
 	{
 		srx_MemFunc memfn = R->memfn;
 		void* memctx = R->memctx;
-		if( R->item )
-			regex_free_item( R, R->item );
+		if( R->root )
+			regex_free_item( R, R->root );
 		memfn( memctx, R, 0 );
 	}
 	return !!R;
@@ -530,33 +632,33 @@ static void regex_dump_item( regex_item* item, int lev )
 	int l = lev;
 	while( l --> 0 )
 		printf( "- " );
-	printf( "type %s ", types[ item->type ] );
-	if( item->flags & RIF_INVERT ) printf( "INV " );
-	if( item->flags & RIF_LAZY ) printf( "LAZY " );
+	printf( "%s", types[ item->type ] );
+	if( item->flags & RIF_INVERT ) printf( " INV" );
+	if( item->flags & RIF_LAZY ) printf( " LAZY" );
 	switch( item->type )
 	{
-	case RIT_MATCH: printf( "char %d", (int) item->a ); break;
+	case RIT_MATCH: printf( " char %d", (int) item->a ); break;
 	case RIT_RANGE:
 		for( l = 0; l < item->count; ++l )
 		{
 			if( l > 0 )
-				printf( ", " );
-			printf( "%d - %d", (int) item->range[l*2], (int) item->range[l*2+1] );
+				printf( "," );
+			printf( " %d - %d", (int) item->range[l*2], (int) item->range[l*2+1] );
 		}
 		break;
-	case RIT_BKREF: printf( "#%d", (int) item->a ); break;
+	case RIT_BKREF: printf( " #%d", (int) item->a ); break;
 	}
-	printf( " (%d to %d) (%#p => %#p)\n", item->min, item->max, item->matchbeg, item->matchend );
+	printf( " (%d to %d) (0x%p => 0x%p)\n", item->min, item->max, item->matchbeg, item->matchend );
 	
 	if( item->ch )
 	{
 		regex_dump_list( item->ch, lev + 1 );
 		if( item->ch2 )
 		{
-			int l = lev + 1;
+			int l = lev;
 			while( l --> 0 )
-				printf( "--" );
-			printf( "-|-\n" );
+				printf( "- " );
+			printf( "--|\n" );
 			regex_dump_list( item->ch2, lev + 1 );
 		}
 	}
@@ -575,6 +677,62 @@ static void regex_dump_list( regex_item* items, int lev )
 */
 void srx_DumpToStdout( srx_Context* R )
 {
-	regex_dump_list( R->item, 0 );
+	regex_dump_list( R->root, 0 );
+}
+
+/*
+	#### srx_Match ####
+*/
+int srx_Match( srx_Context* R, const RX_Char* str )
+{
+	match_ctx ctx = { str, R->root, R };
+	R->string = str;
+	while( *str )
+	{
+		int ret = regex_test( str, &ctx );
+		if( ret < 0 )
+			return 0;
+		if( ret > 0 )
+			return 1;
+		str++;
+	}
+	return 0;
+}
+
+/*
+	#### srx_GetCaptureCount ####
+*/
+int srx_GetCaptureCount( srx_Context* R )
+{
+	return R->numcaps;
+}
+
+/*
+	#### srx_GetCaptured ####
+*/
+int srx_GetCaptured( srx_Context* R, int which, int* pbeg, int* pend )
+{
+	const RX_Char* a, *b;
+	if( srx_GetCapturedPtrs( R, which, &a, &b ) )
+	{
+		if( pbeg ) *pbeg = (size_t)( a - R->string );
+		if( pend ) *pend = (size_t)( b - R->string );
+		return 1;
+	}
+	return 0;
+}
+
+/*
+	#### srx_GetCapturedPtrs ####
+*/
+int srx_GetCapturedPtrs( srx_Context* R, int which, const RX_Char** pbeg, const RX_Char** pend )
+{
+	if( which < 0 || which >= R->numcaps )
+		return 0;
+	if( R->caps[ which ] == NULL )
+		return 0;
+	if( pbeg ) *pbeg = R->caps[ which ]->matchbeg;
+	if( pend ) *pend = R->caps[ which ]->matchend;
+	return 1;
 }
 

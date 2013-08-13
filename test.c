@@ -79,6 +79,16 @@ void* testmemfunc2( void* ud, void* ptr, size_t sz )
 	srx_Destroy( R ); \
 	assert( memusage == 0 );
 
+#define MATCHTEST( str, pat ) \
+	col = printf( "match test: '%s' like '%s'", str, pat ); \
+	if( col > 35 ) col = 0; else col = 35 - col; \
+	R = srx_CreateExt( pat, "", err, testmemfunc2, NULL ); \
+	printf( "%*s output code: %d, position %d", col, "", err[0], err[1] ); \
+	if( R ){ printf( ", match: %s\n", srx_Match( R, str ) ? "TRUE" : "FALSE" ); } else puts(""); \
+	if( R && ( flags & TEST_DUMP ) ){ srx_DumpToStdout( R ); puts(""); } \
+	srx_Destroy( R ); \
+	assert( memusage == 0 );
+
 
 int main( int argc, char* argv[] )
 {
@@ -94,6 +104,7 @@ int main( int argc, char* argv[] )
 			flags |= TEST_MONKEY;
 	}
 	
+	COMPTEST( "" );
 	COMPTEST( "a" );
 	COMPTEST( "[a-z]" );
 	COMPTEST( "[^a-z]" );
@@ -106,72 +117,33 @@ int main( int argc, char* argv[] )
 	COMPTEST( ".*?" );
 	COMPTEST( "^.*X.*$" );
 	COMPTEST( ".*?*" );
-	COMPTEST( "a|b" );
 	COMPTEST( "[-z]" );
 	COMPTEST( "[a-]" );
 	COMPTEST( "[^]z]" );
+	COMPTEST( "|b" );
+	COMPTEST( "a|" );
+	COMPTEST( "a|b" );
+	COMPTEST( "a(b|c)d" );
+	COMPTEST( "( [a-z]{2,8}){1,2}" );
+	COMPTEST( " |[a-z]{2,8}" );
+	COMPTEST( "<([a-z]+)>.*?<\\1>" );
 	
-#if 0
-	const char* A = "a cat where";
-	RX_Char range[] = { 'a', 'z' };
-	regex_item items[] =
-	{
-		{
-			NULL, NULL, NULL, NULL,
-			range, 1,
-			RIT_MATCH, 0, ' ',
-			1, 1,
-			NULL, NULL, 0,
-		},
-		{
-			NULL, NULL, NULL, NULL,
-			range, 1,
-			RIT_RANGE, 0, 'c',
-			2, 8,
-			NULL, NULL, 0,
-		},
-		{
-			NULL, NULL, NULL, NULL,
-			range, 1,
-			RIT_SPCEND, 0, 'c',
-			1, 1,
-			NULL, NULL, 0,
-		},
-		{
-			NULL, NULL, NULL, NULL,
-			NULL, 0,
-			RIT_SUBEXP, 0, 0,
-			1, 2,
-			NULL, NULL, 0,
-		},
-		{
-			NULL, NULL, NULL, NULL,
-			NULL, 0,
-			RIT_SUBEXP, 0, 0,
-			1, 1,
-			NULL, NULL, 0,
-		},
-		{
-			NULL, NULL, NULL, NULL,
-			NULL, 0,
-			RIT_EITHER, 0, 0,
-			0, 1,
-			NULL, NULL, 0,
-		},
-	};
-//	items[0].next = items + 1;
-//	items[1].prev = items + 0;
-//	items[1].next = items + 2;
-//	items[2].prev = items + 1;
-	items[3].ch = items + 0;
-	items[4].ch = items + 3;
-	items[5].ch = items + 0;
-	items[5].ch2 = items + 1;
-	/* ( [a-z]){1,2} */
-	/*  |[a-z]{2,8} */
-	printf( "'%s' (%p) => %d\n", A, A, regex_scan( A, items+5 ) );
-	regex_dump_list( items+5, 0 );
-#endif
+	MATCHTEST( "a cat", " c" );
+	MATCHTEST( " in the 2013-01-02...", "[0-9]{4}-[0-9]{2}-[0-9]{2}" );
+	MATCHTEST( "a cat", "(f|c)at" );
+	MATCHTEST( "a cat", "(f|r)at" );
+	MATCHTEST( "a cat", "a cat" );
+	MATCHTEST( "a cat", "cat$" );
+	MATCHTEST( "a cat", "^cat" );
+	MATCHTEST( "a cat", "^a" );
+	MATCHTEST( "captured", "((x(y))|(p))" );
+	MATCHTEST( "a cat", ".*" );
+	MATCHTEST( "a cat", ".*?" );
+	MATCHTEST( "<tag> b <tag>", "<([a-z]{1,5})>.*?<\\1>" );
+//	MATCHTEST( "<tag> b <tag>", "[a-z]+" );
+//	MATCHTEST( "<tag> b <tag>", "([a-z]+)" );
+//	MATCHTEST( "<tag> b <tag>", "<([a-z]+)>" );
+//	MATCHTEST( "<tag> b <tag>", "<([a-z]+)>.*?<\\1>" );
 	
 	return 0;
 }
