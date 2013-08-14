@@ -1,4 +1,4 @@
---- SGRegex [SRX] regular expression library v0.9b ---
+--- SGRegex [SRX] regular expression library v0.95b ---
 
 Simple and fully featured regular expression library with a minimalistic implementation in C.
 
@@ -14,8 +14,8 @@ support:
 - "|" (the "or" operator)
 - "^", "$" (beginning/end matchers)
 - "*?", "+?" (lazy quantifiers)
-- modifier "m" - multiline (!TODO)
-- modifier "i" - case insensitive matcing (!TODO)
+- modifier "m" - multiline
+- modifier "i" - case insensitive matcing
 - modifier "s" - dot includes newlines
 
 API documentation:
@@ -31,10 +31,10 @@ API documentation:
 > function srx_CreateExt
 (
 	const RX_Char* regex, // the regular expression
-	const RX_Char* mods, // modifier char list
+	const RX_Char* mods, // modifier char list (optional)
 	int* errnpos, // pointer to an array of *two* int values: error code and error position (optional)
-	srx_MemFunc memfn, // memory allocation function (optional, pass srx_DefaultMemFunc for default)
-	void* memctx // user pointer to pass to the allocation function
+	srx_MemFunc memfn, // memory allocation function (optional)
+	void* memctx // user pointer to pass to the allocation function (optional)
 );
 - creates a regular expression matcher from the specified expression and modifier list
 - allows to specify custom memory allocation and error output

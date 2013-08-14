@@ -34,13 +34,7 @@ static void* srx_DefaultMemFunc( void* userdata, void* ptr, size_t size )
 	return NULL;
 }
 
-
-#ifdef RX_CHARACTER_TYPE
-typedef RX_CHARACTER_TYPE RX_Char;
-#else
 typedef char RX_Char;
-#endif
-
 
 typedef struct _srx_Context srx_Context;
 

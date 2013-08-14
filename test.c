@@ -76,14 +76,16 @@ void* testmemfunc2( void* ud, void* ptr, size_t sz )
 int err[2], col, flags = 0;
 srx_Context* R;
 
-void COMPTEST( const char* pat )
+void comptest_ext( const char* pat, const char* mod )
 {
 	col = printf( "compile test: '%s'", pat );
+	if( mod )
+		col += printf( "(%s)", mod );
 	if( col > 25 )
 		col = 0;
 	else
 		col = 25 - col;
-	R = srx_CreateExt( pat, "", err, testmemfunc2, NULL );
+	R = srx_CreateExt( pat, mod, err, testmemfunc2, NULL );
 	printf( "%*s output code: %d, position %d\n", col, "", err[0], err[1] );
 	if( R && ( flags & TEST_DUMP ) )
 	{
@@ -93,15 +95,19 @@ void COMPTEST( const char* pat )
 	srx_Destroy( R );
 	assert( memusage == 0 );
 }
+#define COMPTEST( pat ) comptest_ext( pat, NULL )
+#define COMPTEST2( pat, mod ) comptest_ext( pat, mod )
 
-void MATCHTEST( const char* str, const char* pat )
+void matchtest_ext( const char* str, const char* pat, const char* mod )
 {
 	col = printf( "match test: '%s' like '%s'", str, pat );
+	if( mod )
+		col += printf( "(%s)", mod );
 	if( col > 35 )
 		col = 0;
 	else
 		col = 35 - col;
-	R = srx_CreateExt( pat, "", err, testmemfunc2, NULL );
+	R = srx_CreateExt( pat, mod, err, testmemfunc2, NULL );
 	printf( "%*s output code: %d, position %d", col, "", err[0], err[1] );
 	if( R )
 	{
@@ -117,16 +123,20 @@ void MATCHTEST( const char* str, const char* pat )
 	srx_Destroy( R );
 	assert( memusage == 0 );
 }
+#define MATCHTEST( str, pat ) matchtest_ext( str, pat, NULL )
+#define MATCHTEST2( str, pat, mod ) matchtest_ext( str, pat, mod )
 
-void REPTEST( const char* str, const char* pat, const char* rep )
+void reptest_ext( const char* str, const char* pat, const char* mod, const char* rep )
 {
 	char* out;
 	col = printf( "replace test: '%s' like '%s' to '%s'", str, pat, rep );
+	if( mod )
+		col += printf( "(%s)", mod );
 	if( col > 40 )
 		col = 0;
 	else
 		col = 35 - col;
-	R = srx_CreateExt( pat, "", err, testmemfunc2, NULL );
+	R = srx_CreateExt( pat, mod, err, testmemfunc2, NULL );
 	printf( "%*s output code: %d, position %d", col, "", err[0], err[1] );
 	if( R )
 	{
@@ -143,6 +153,8 @@ void REPTEST( const char* str, const char* pat, const char* rep )
 	srx_Destroy( R );
 	assert( memusage == 0 );
 }
+#define REPTEST( str, pat, rep ) reptest_ext( str, pat, NULL, rep )
+#define REPTEST2( str, pat, mod, rep ) reptest_ext( str, pat, mod, rep )
 
 
 int main( int argc, char* argv[] )
@@ -156,6 +168,7 @@ int main( int argc, char* argv[] )
 			flags |= TEST_MONKEY;
 	}
 	
+	printf( "\n> compilation tests\n\n" );
 	COMPTEST( "" );
 	COMPTEST( "a" );
 	COMPTEST( "[a-z]" );
@@ -180,6 +193,7 @@ int main( int argc, char* argv[] )
 	COMPTEST( " |[a-z]{2,8}" );
 	COMPTEST( "<([a-z]+)>.*?<\\1>" );
 	
+	printf( "\n> matching tests\n\n" );
 	MATCHTEST( "a cat", " c" );
 	MATCHTEST( " in the 2013-01-02...", "[0-9]{4}-[0-9]{2}-[0-9]{2}" );
 	MATCHTEST( "a cat", "(f|c)at" );
@@ -198,8 +212,29 @@ int main( int argc, char* argv[] )
 	MATCHTEST( "some *special* text", "\\*.*?\\*" );
 	MATCHTEST( "some *special* text", "\\*(.*?)\\*" );
 	
+	printf( "\n> replacement tests\n\n" );
 	REPTEST( "some *special* text", "\\*.*?\\*", "SpEcIaL" );
 	REPTEST( "some *special* text", "\\*(.*?)\\*", "<b>\\1</b>" );
+	
+	printf( "\n> modifier tests\n\n" );
+	/* modifier - 'i' */
+	COMPTEST2( "A", "i" );
+	COMPTEST2( "[a-z]", "i" );
+	MATCHTEST2( "Cat", "A", "i" );
+	MATCHTEST2( "CAT", "a", "i" );
+	MATCHTEST2( "X", "[a-z]", "i" );
+	REPTEST2( "some text here", "[a-z]+", "i", "\\\\($0)$$" );
+	
+	/* modifier - 's' */
+	COMPTEST2( ".", "s" );
+	MATCHTEST2( "\r\n", ".", "" );
+	MATCHTEST2( "\r\n", ".", "s" );
+	
+	/* modifier - 'm' */
+	COMPTEST2( "^$", "m" );
+	MATCHTEST2( "line 1\nline 2\nline 3", "^line 1$", "m" );
+	MATCHTEST2( "line 1\nline 2\nline 3", "^line 2$", "m" );
+	MATCHTEST2( "line 1\nline 2\nline 3", "^line 3$", "m" );
 	
 	assert( memusage == 0 );
 	

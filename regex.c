@@ -19,6 +19,9 @@
 #define RX_ALLOC( what ) RX_ALLOC_N( what, 1 )
 #define RX_FREE( ptr ) R->memfn( R->memctx, ptr, 0 )
 
+#define RX_IS_ALPHA( x ) isalpha( x )
+#define RX_EQUALIZE( x ) tolower( x )
+
 
 #define RIT_MATCH  1 /* matching */
 #define RIT_RANGE  2
@@ -60,6 +63,7 @@ struct _srx_Context
 {
 	/* structure */
 	regex_item*    root;
+	int            flags;
 	
 	/* memory */
 	srx_MemFunc    memfn;
@@ -93,28 +97,53 @@ static int regex_match_once( match_ctx* ctx )
 	switch( item->type )
 	{
 	case RIT_MATCH:
-		if( *str == item->a )
 		{
-			item->matchend++;
-			return 1;
+			RX_Char ch = *str;
+			if( ctx->R->flags & RCF_CASELESS )
+				ch = RX_EQUALIZE( *str );
+			if( ch == item->a )
+			{
+				item->matchend++;
+				return 1;
+			}
 		}
 		break;
 	case RIT_RANGE:
 		{
-			int inv = ( item->flags & RIF_INVERT ) != 0;
+			RX_Char ch = *str;
+			int inv = ( item->flags & RIF_INVERT ) != 0, inrange = 0;
+			if( ctx->R->flags & RCF_CASELESS )
+				ch = RX_EQUALIZE( *str );
 			for( i = 0; i < item->count*2; i += 2 )
 			{
-				if( ( *str >= item->range[i] && *str <= item->range[i+1] ) ^ inv )
+				if( ch >= item->range[i] && ch <= item->range[i+1] )
 				{
-					item->matchend++;
-					return 1;
+					inrange = 1;
+					break;
 				}
+			}
+			if( inrange ^ inv )
+			{
+				item->matchend++;
+				return 1;
 			}
 		}
 		break;
 	case RIT_SPCBEG:
+		if( ctx->R->flags & RCF_MULTILINE && ( *item->matchend == '\n' || *item->matchend == '\r' ) )
+		{
+			if( *item->matchend == '\r' && item->matchend[1] == '\n' )
+				item->matchend++;
+			item->matchend++;
+			item->matchbeg = item->matchend;
+			return 1;
+		}
 		return ctx->string == item->matchend;
 	case RIT_SPCEND:
+		if( ctx->R->flags & RCF_MULTILINE && ( *item->matchend == '\n' || *item->matchend == '\r' ) )
+		{
+			return 1;
+		}
 		return !*str;
 	case RIT_BKREF:
 		{
@@ -364,7 +393,7 @@ static void regex_level( regex_item** pitem )
 	}
 }
 
-static int regex_real_compile( srx_Context* R, int* cel, const RX_Char** pstr, int sub, int modflags, regex_item** out )
+static int regex_real_compile( srx_Context* R, int* cel, const RX_Char** pstr, int sub, regex_item** out )
 {
 #define _RX_ALLOC_NODE( ty ) \
 	item = RX_ALLOC( regex_item ); \
@@ -446,6 +475,20 @@ static int regex_real_compile( srx_Context* R, int* cel, const RX_Char** pstr, i
 				s = sc;
 				if( *s == ']' )
 					s++;
+				if( R->flags & RCF_CASELESS )
+				{
+					int i;
+					ri = item->range;
+					for( i = 0; i < cnt * 2; i += 2 )
+					{
+						RX_Char A = ri[ i ], B = ri[ i + 1 ];
+						if( RX_IS_ALPHA( A ) && RX_IS_ALPHA( B ) )
+						{
+							ri[ i ] = RX_EQUALIZE( A );
+							ri[ i + 1 ] = RX_EQUALIZE( B );
+						}
+					}
+				}
 			}
 			break;
 		case ']':
@@ -460,7 +503,7 @@ static int regex_real_compile( srx_Context* R, int* cel, const RX_Char** pstr, i
 					R->caps[ cap ] = item;
 				}
 				s++;
-				r = regex_real_compile( R, cel, &s, 1, modflags, &item->ch );
+				r = regex_real_compile( R, cel, &s, 1, &item->ch );
 				if( r )
 					_RXE( r );
 				if( *s != ')' )
@@ -576,7 +619,7 @@ static int regex_real_compile( srx_Context* R, int* cel, const RX_Char** pstr, i
 			if( *s == '.' )
 			{
 				_RX_ALLOC_NODE( RIT_RANGE );
-				if( !( modflags & RCF_DOTALL ) )
+				if( !( R->flags & RCF_DOTALL ) )
 				{
 					item->range = RX_ALLOC_N( RX_Char, 2 * 2 );
 					item->range[0] = item->range[1] = '\n';
@@ -589,6 +632,8 @@ static int regex_real_compile( srx_Context* R, int* cel, const RX_Char** pstr, i
 			{
 				_RX_ALLOC_NODE( RIT_MATCH );
 				item->a = *s;
+				if( R->flags & RCF_CASELESS && RX_IS_ALPHA( item->a ) )
+					item->a = RX_EQUALIZE( item->a );
 			}
 			s++;
 			break;
@@ -617,19 +662,25 @@ srx_Context* srx_CreateExt( const RX_Char* str, const RX_Char* mods, int* errnpo
 {
 	int flags = 0, err, cel[ RX_MAX_CAPTURES ];
 	srx_Context* R = NULL;
-	while( *mods )
+	if( mods )
 	{
-		switch( *mods )
+		while( *mods )
 		{
-		case 'm': flags |= RCF_MULTILINE; break;
-		case 'i': flags |= RCF_CASELESS; break;
-		case 's': flags |= RCF_DOTALL; break;
-		default:
-			err = RXEINMOD;
-			goto fail;
+			switch( *mods )
+			{
+			case 'm': flags |= RCF_MULTILINE; break;
+			case 'i': flags |= RCF_CASELESS; break;
+			case 's': flags |= RCF_DOTALL; break;
+			default:
+				err = RXEINMOD;
+				goto fail;
+			}
+			mods++;
 		}
-		mods++;
 	}
+	
+	if( !memfn )
+		memfn = srx_DefaultMemFunc;
 	
 	R = (srx_Context*) memfn( memctx, NULL, sizeof(srx_Context) );
 	memset( R, 0, sizeof(*R) );
@@ -637,9 +688,10 @@ srx_Context* srx_CreateExt( const RX_Char* str, const RX_Char* mods, int* errnpo
 	R->memfn = memfn;
 	R->memctx = memctx;
 	R->string = str;
+	R->flags = flags;
 	R->numcaps = 1;
 	
-	err = regex_real_compile( R, cel, &str, 0, flags, &R->root );
+	err = regex_real_compile( R, cel, &str, 0, &R->root );
 	
 	if( err )
 	{
@@ -838,7 +890,8 @@ RX_Char* srx_Replace( srx_Context* R, const RX_Char* str, const RX_Char* rep )
 		rp = rep;
 		while( *rp )
 		{
-			if( *rp == '\\' && rp[1] )
+			RX_Char rc = *rp;
+			if( ( rc == '\\' || rc == '$' ) && rp[1] )
 			{
 				if( isdigit( rp[1] ) )
 				{
@@ -851,7 +904,7 @@ RX_Char* srx_Replace( srx_Context* R, const RX_Char* str, const RX_Char* rep )
 					rp += 2;
 					continue;
 				}
-				else if( *rp == '\\' )
+				else if( rp[1] == rc )
 				{
 					rp++;
 					continue;
