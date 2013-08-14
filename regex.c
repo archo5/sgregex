@@ -8,6 +8,7 @@
 #define MAX(a,b) ((a)>(b)?(a):(b))
 
 
+#define RX_NEED_DEFAULT_MEMFUNC
 #include "regex.h"
 
 
@@ -38,6 +39,15 @@
 #define RCF_CASELESS  0x02 /* pre-equalized case for match/range */
 #define RCF_DOTALL    0x04 /* "." is compiled as "[^]" instead of "[^\r\n]" */
 
+#ifndef RXLOG
+#define RXLOG 0
+#endif
+
+#if RXLOG
+#define RXLOGINFO( x ) x
+#else
+#define RXLOGINFO( x )
+#endif
 
 typedef struct _regex_item regex_item;
 struct _regex_item
@@ -94,6 +104,7 @@ static int regex_match_once( match_ctx* ctx )
 	int i;
 	regex_item* item = ctx->item;
 	const RX_Char* str = item->matchend;
+	RXLOGINFO( printf( "type %d action at %p (%.5s)\n", item->type, str, str ) );
 	switch( item->type )
 	{
 	case RIT_MATCH:
@@ -147,7 +158,7 @@ static int regex_match_once( match_ctx* ctx )
 		return !*str;
 	case RIT_BKREF:
 		{
-			regex_item* cap = ctx->R->caps[ item->a ];
+			regex_item* cap = ctx->R->caps[ (int) item->a ];
 			int len = cap->matchend - cap->matchbeg;
 			int len2 = strlen( str );
 			if( len2 >= len && strncmp( cap->matchbeg, str, len ) == 0 )
@@ -198,12 +209,18 @@ static int regex_match_many( match_ctx* ctx )
 		for( i = 0; i < item->counter; ++i )
 		{
 			if( !*item->matchend && item->type != RIT_SPCEND )
-				return i >= item->min && i <= item->max;
-			if( !regex_match_once( ctx ) )
 			{
+				RXLOGINFO( printf( "stopped while matching, %d between %d and %d?\n", i, item->min, item->max ) );
 				item->counter = item->flags & RIF_LAZY ? item->max : i;
 				return i >= item->min && i <= item->max;
 			}
+			if( !regex_match_once( ctx ) )
+			{
+				RXLOGINFO( printf( "did not match\n" ) );
+				item->counter = item->flags & RIF_LAZY ? item->max : i;
+				return i >= item->min && i <= item->max;
+			}
+			RXLOGINFO( else printf( "matched\n" ) );
 		}
 		return 1;
 	}
@@ -235,6 +252,10 @@ static int regex_subexp_backtrack( regex_item* item )
 		p = p->prev;
 		chgh = 1;
 	}
+	
+	RXLOGINFO( printf( "subexp backtrack - %s\n", p ? "success" : "failure" ) );
+	RXLOGINFO( if( p ) printf( "subexp-backtracked to type %d ctr=%d min=%d max=%d\n", p->type, p->counter, p->min, p->max ) );
+	
 	return !!p;
 }
 
@@ -256,6 +277,7 @@ static int regex_test( const RX_Char* str, match_ctx* ctx, int subexp )
 			p = p->next;
 			if( !p )
 				return 1;
+			RXLOGINFO( printf( "moving on to type %d action\n", p->type ) );
 			p->matchbeg = p->prev->matchend;
 			p->counter = p->flags & RIF_LAZY ? p->min : p->max;
 			if( p->type == RIT_SUBEXP )
@@ -287,6 +309,7 @@ static int regex_test( const RX_Char* str, match_ctx* ctx, int subexp )
 					if( p->counter >= p->min )
 						break;
 				}
+				RXLOGINFO( printf( "backtrack\n" ) );
 				p = p->prev;
 				chgh = 1;
 			}

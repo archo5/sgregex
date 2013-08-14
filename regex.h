@@ -26,6 +26,7 @@ typedef void* (*srx_MemFunc)
 	size_t /* size */
 );
 
+#ifdef RX_NEED_DEFAULT_MEMFUNC
 static void* srx_DefaultMemFunc( void* userdata, void* ptr, size_t size )
 {
 	if( size )
@@ -33,6 +34,7 @@ static void* srx_DefaultMemFunc( void* userdata, void* ptr, size_t size )
 	free( ptr );
 	return NULL;
 }
+#endif
 
 typedef char RX_Char;
 
