@@ -242,6 +242,8 @@ int main( int argc, char* argv[] )
 	MATCHTEST2( " awful", "([a-z]+)thing", "i" );
 	REPTEST2( "something awful", "([a-z]+)thing", "i", "$1what" );
 	
+	REPTEST( "`if/else`, `while`, `for`, `do/while`, `foreach`", "(^|[ \n\r\t,.])`([^`]+)`($|[ \n\r\t,.])", "$1##$2##$3" );
+	
 	assert( memusage == 0 );
 	
 	return 0;

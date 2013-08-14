@@ -208,7 +208,7 @@ static int regex_match_many( match_ctx* ctx )
 		int i;
 		for( i = 0; i < item->counter; ++i )
 		{
-			if( !*item->matchend && item->type != RIT_SPCEND )
+			if( !*item->matchend && item->type != RIT_SPCEND && item->type != RIT_EITHER && item->type != RIT_SUBEXP )
 			{
 				RXLOGINFO( printf( "stopped while matching, %d between %d and %d?\n", i, item->min, item->max ) );
 				item->counter = item->flags & RIF_LAZY ? item->max : i;
@@ -605,6 +605,9 @@ static int regex_real_compile( srx_Context* R, int* cel, const RX_Char** pstr, i
 			if( !citem )
 				_RXE( RXEUNEXP );
 			_RX_ALLOC_NODE( RIT_EITHER );
+			item->min = 0;
+			item->max = 1;
+			item->flags |= RIF_LAZY;
 			s++;
 			break;
 		case '^':
