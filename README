@@ -7,12 +7,13 @@ usage:
 
 support:
 - "." (dot)
-- "*", "+", "?" (simple multipliers)
-- "{<num>}", "{<num1>,<num2>}" (complex multipliers)
+- "*", "+", "?" (simple quantifiers)
+- "{<num>}", "{<num1>,<num2>}" (complex quantifiers)
 - "[...]", "[^...]" (character classes)
 - "(...)" (subexpressions/capture ranges)
 - "|" (the "or" operator)
 - "^", "$" (beginning/end matchers)
+- "*?", "+?" (lazy quantifiers)
 - modifier "m" - multiline (!TODO)
 - modifier "i" - case insensitive matcing (!TODO)
 - modifier "s" - dot includes newlines
@@ -88,6 +89,21 @@ API documentation:
 - retrieves the offset pointers from the specified capture range
 - returns if the capture range number is in range and if the last match included the capture range (which also means that data was written to specified pointers)
 
+> function srx_Replace
+(
+	srx_Context* R, // the regex matcher contex
+	const RX_Char* str, // the input string
+	const RX_Char* rep // the replacement string (supports capture ranges in the form of "\1")
+)
+- replaces occurrences of pattern in string `str` with string `rep`, returns the replaced string
+- the returned string is allocated with the registered allocator
+
+> function srx_FreeReplaced
+(
+	srx_Context* R,
+	RX_Char* repstr
+)
+- frees the string returned by srx_Replace
 
 
 credits:

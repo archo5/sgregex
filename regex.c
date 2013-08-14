@@ -5,6 +5,8 @@
 #include <string.h>
 #include <limits.h>
 
+#define MAX(a,b) ((a)>(b)?(a):(b))
+
 
 #include "regex.h"
 
@@ -80,7 +82,7 @@ typedef struct _match_ctx
 match_ctx;
 
 
-static int regex_test( const RX_Char* str, match_ctx* ctx );
+static int regex_test( const RX_Char* str, match_ctx* ctx, int subexp );
 
 
 static int regex_match_once( match_ctx* ctx )
@@ -129,7 +131,7 @@ static int regex_match_once( match_ctx* ctx )
 	case RIT_SUBEXP:
 		{
 			match_ctx cc = { ctx->string, item->ch, ctx->R };
-			if( regex_test( str, &cc ) )
+			if( regex_test( str, &cc, 1 ) )
 			{
 				regex_item* p = item->ch;
 				while( p->next )
@@ -151,7 +153,7 @@ static int regex_match_many( match_ctx* ctx )
 	{
 		regex_item* chi = item->counter ? item->ch2 : item->ch;
 		match_ctx cc = { ctx->string, chi, ctx->R };
-		if( regex_test( item->matchbeg, &cc ) )
+		if( regex_test( item->matchbeg, &cc, 0 ) )
 		{
 			regex_item* p = chi;
 			while( p->next )
@@ -178,11 +180,41 @@ static int regex_match_many( match_ctx* ctx )
 	}
 }
 
-static int regex_test( const RX_Char* str, match_ctx* ctx )
+static int regex_subexp_backtrack( regex_item* item )
+{
+	int chgh = 0;
+	regex_item* p = item->ch;
+	while( p->next )
+		p = p->next;
+	
+	while( p )
+	{
+		if( chgh && p->type == RIT_SUBEXP && regex_subexp_backtrack( p ) )
+			break;
+		else if( p->flags & RIF_LAZY )
+		{
+			p->counter++;
+			if( p->counter <= p->max )
+				break;
+		}
+		else
+		{
+			p->counter--;
+			if( p->counter >= p->min )
+				break;
+		}
+		p = p->prev;
+		chgh = 1;
+	}
+	return !!p;
+}
+
+static int regex_test( const RX_Char* str, match_ctx* ctx, int subexp )
 {
 	regex_item* p = ctx->item;
 	p->matchbeg = str;
-	p->counter = p->flags & RIF_LAZY ? p->min : p->max;
+	if( !subexp )
+		p->counter = p->flags & RIF_LAZY ? p->min : p->max;
 	
 	for(;;)
 	{
@@ -197,12 +229,24 @@ static int regex_test( const RX_Char* str, match_ctx* ctx )
 				return 1;
 			p->matchbeg = p->prev->matchend;
 			p->counter = p->flags & RIF_LAZY ? p->min : p->max;
+			if( p->type == RIT_SUBEXP )
+			{
+				regex_item* c = p->ch;
+				while( c )
+				{
+					c->counter = c->flags & RIF_LAZY ? c->min : c->max;
+					c = c->type == RIT_SUBEXP ? c->ch : NULL;
+				}
+			}
 		}
 		else
 		{
+			int chgh = 0;
 			while( p )
 			{
-				if( p->flags & RIF_LAZY )
+				if( chgh && p->type == RIT_SUBEXP && regex_subexp_backtrack( p ) )
+					break;
+				else if( p->flags & RIF_LAZY )
 				{
 					p->counter++;
 					if( p->counter <= p->max )
@@ -215,11 +259,28 @@ static int regex_test( const RX_Char* str, match_ctx* ctx )
 						break;
 				}
 				p = p->prev;
+				chgh = 1;
 			}
 			if( !p )
 				return 0;
 		}
 	}
+}
+
+static int regex_test_start( const RX_Char* str, match_ctx* ctx )
+{
+	regex_item* p = ctx->item;
+	p->counter = p->flags & RIF_LAZY ? p->min : p->max;
+	if( p->type == RIT_SUBEXP )
+	{
+		regex_item* c = p->ch;
+		while( c )
+		{
+			c->counter = c->flags & RIF_LAZY ? c->min : c->max;
+			c = c->type == RIT_SUBEXP ? c->ch : NULL;
+		}
+	}
+	return regex_test( str, ctx, 0 );
 }
 
 
@@ -587,7 +648,13 @@ srx_Context* srx_CreateExt( const RX_Char* str, const RX_Char* mods, int* errnpo
 	}
 	else
 	{
-		R->caps[ 0 ] = R->root;
+		regex_item* item = RX_ALLOC( regex_item );
+		memset( item, 0, sizeof(*item) );
+		item->type = RIT_SUBEXP;
+		item->min = 1;
+		item->max = 1;
+		item->ch = R->root;
+		R->caps[ 0 ] = R->root = item;
 	}
 fail:
 	if( errnpos )
@@ -686,7 +753,7 @@ int srx_Match( srx_Context* R, const RX_Char* str, int offset )
 	str += offset;
 	while( *str )
 	{
-		ret = regex_test( str, &ctx );
+		ret = regex_test_start( str, &ctx );
 		if( ret < 0 )
 			return 0;
 		if( ret > 0 )
@@ -731,5 +798,88 @@ int srx_GetCapturedPtrs( srx_Context* R, int which, const RX_Char** pbeg, const 
 	if( pbeg ) *pbeg = R->caps[ which ]->matchbeg;
 	if( pend ) *pend = R->caps[ which ]->matchend;
 	return 1;
+}
+
+/*
+	#### srx_Replace ####
+*/
+RX_Char* srx_Replace( srx_Context* R, const RX_Char* str, const RX_Char* rep )
+{
+	RX_Char* out = "";
+	const RX_Char *from = str, *fromend = str + strlen( str );
+	int size = 0, mem = 0;
+	
+#define SR_CHKSZ( szext ) \
+	if( mem - size < szext ) \
+	{ \
+		int nsz = MAX( mem * 2, size + szext ) + 1; \
+		RX_Char* nmem = RX_ALLOC_N( RX_Char, nsz ); \
+		if( mem ) \
+		{ \
+			memcpy( nmem, out, size + 1 ); \
+			RX_FREE( out ); \
+		} \
+		out = nmem; \
+		mem = nsz; \
+	}
+#define SR_ADDBUF( from, to ) \
+	SR_CHKSZ( to - from ) \
+	memcpy( out + size, from, to - from ); \
+	size += to - from;
+	
+	while( *from )
+	{
+		const RX_Char* ofp, *ep, *rp;
+		if( !srx_Match( R, from, 0 ) )
+			break;
+		srx_GetCapturedPtrs( R, 0, &ofp, &ep );
+		SR_ADDBUF( from, ofp );
+		
+		rp = rep;
+		while( *rp )
+		{
+			if( *rp == '\\' && rp[1] )
+			{
+				if( isdigit( rp[1] ) )
+				{
+					int dig = rp[1] - '0';
+					const RX_Char *brp, *erp;
+					if( srx_GetCapturedPtrs( R, dig, &brp, &erp ) )
+					{
+						SR_ADDBUF( brp, erp );
+					}
+					rp += 2;
+					continue;
+				}
+				else if( *rp == '\\' )
+				{
+					rp++;
+					continue;
+				}
+			}
+			SR_ADDBUF( rp, rp + 1 );
+			rp++;
+		}
+		
+		if( from == ep )
+			from++;
+		else
+			from = ep;
+	}
+	
+	SR_ADDBUF( from, fromend );
+	{
+		char nul = 0;
+		SR_ADDBUF( &nul, &nul + 1 );
+	}
+	return out;
+}
+
+/*
+	#### srx_FreeReplaced ####
+*/
+void srx_FreeReplaced( srx_Context* R, RX_Char* repstr )
+{
+	RX_FREE( repstr );
 }
 

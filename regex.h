@@ -55,6 +55,9 @@ int srx_GetCaptureCount( srx_Context* R );
 int srx_GetCaptured( srx_Context* R, int which, int* pbeg, int* pend );
 int srx_GetCapturedPtrs( srx_Context* R, int which, const RX_Char** pbeg, const RX_Char** pend );
 
+RX_Char* srx_Replace( srx_Context* R, const RX_Char* str, const RX_Char* rep );
+void srx_FreeReplaced( srx_Context* R, RX_Char* repstr );
+
 
 #ifdef __cplusplus
 }

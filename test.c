@@ -31,12 +31,15 @@ typedef unsigned char byte;
 #define GUARD 0xA5
 #define PADDING 64
 
-void mem_validate( byte* pp, byte bits, int numbytes )
+void mem_validate( byte* pp, byte bits, int numbytes, int region )
 {
 	byte* ppe = pp + numbytes;
 	while( pp < ppe )
 	{
-		assert( *pp == bits );
+		if( region )
+			assert( *pp == bits && "AFTER" );
+		else
+			assert( *pp == bits && "BEFORE" );
 		pp++;
 	}
 }
@@ -50,8 +53,8 @@ void* testmemfunc2( void* ud, void* ptr, size_t sz )
 		pp -= PADDING;
 		sp = (size_t*) pp;
 		size = *(sp-1);
-		mem_validate( pp, GUARD, PADDING );
-		mem_validate( pp + size - PADDING, GUARD, PADDING );
+		mem_validate( pp, GUARD, PADDING, 0 );
+		mem_validate( pp + size - PADDING, GUARD, PADDING, 1 );
 		ptr = pp;
 	}
 	ptr = testmemfunc( NULL, ptr, sz ? sz + PADDING * 2 : 0 );
@@ -69,33 +72,82 @@ void* testmemfunc2( void* ud, void* ptr, size_t sz )
 #define TEST_DUMP 1
 #define TEST_MONKEY 2
 #define STREQ( a, b ) (strcmp(a,b)==0)
+	
+int err[2], col, flags = 0;
+srx_Context* R;
 
-#define COMPTEST( pat ) \
-	col = printf( "compile test: '%s'", pat ); \
-	if( col > 25 ) col = 0; else col = 25 - col; \
-	R = srx_CreateExt( pat, "", err, testmemfunc2, NULL ); \
-	printf( "%*s output code: %d, position %d\n", col, "", err[0], err[1] ); \
-	if( R && ( flags & TEST_DUMP ) ){ srx_DumpToStdout( R ); puts(""); } \
-	srx_Destroy( R ); \
+void COMPTEST( const char* pat )
+{
+	col = printf( "compile test: '%s'", pat );
+	if( col > 25 )
+		col = 0;
+	else
+		col = 25 - col;
+	R = srx_CreateExt( pat, "", err, testmemfunc2, NULL );
+	printf( "%*s output code: %d, position %d\n", col, "", err[0], err[1] );
+	if( R && ( flags & TEST_DUMP ) )
+	{
+		srx_DumpToStdout( R );
+		puts("");
+	}
+	srx_Destroy( R );
 	assert( memusage == 0 );
+}
 
-#define MATCHTEST( str, pat ) \
-	col = printf( "match test: '%s' like '%s'", str, pat ); \
-	if( col > 35 ) col = 0; else col = 35 - col; \
-	R = srx_CreateExt( pat, "", err, testmemfunc2, NULL ); \
-	printf( "%*s output code: %d, position %d", col, "", err[0], err[1] ); \
-	if( R ){ printf( ", match: %s\n", srx_Match( R, str, 0 ) ? "TRUE" : "FALSE" ); } else puts(""); \
-	if( R && ( flags & TEST_DUMP ) ){ srx_DumpToStdout( R ); puts(""); } \
-	srx_Destroy( R ); \
+void MATCHTEST( const char* str, const char* pat )
+{
+	col = printf( "match test: '%s' like '%s'", str, pat );
+	if( col > 35 )
+		col = 0;
+	else
+		col = 35 - col;
+	R = srx_CreateExt( pat, "", err, testmemfunc2, NULL );
+	printf( "%*s output code: %d, position %d", col, "", err[0], err[1] );
+	if( R )
+	{
+		printf( ", match: %s\n", srx_Match( R, str, 0 ) ? "TRUE" : "FALSE" );
+	}
+	else
+		puts("");
+	if( R && ( flags & TEST_DUMP ) )
+	{
+		srx_DumpToStdout( R );
+		puts("");
+	}
+	srx_Destroy( R );
 	assert( memusage == 0 );
+}
+
+void REPTEST( const char* str, const char* pat, const char* rep )
+{
+	char* out;
+	col = printf( "replace test: '%s' like '%s' to '%s'", str, pat, rep );
+	if( col > 40 )
+		col = 0;
+	else
+		col = 35 - col;
+	R = srx_CreateExt( pat, "", err, testmemfunc2, NULL );
+	printf( "%*s output code: %d, position %d", col, "", err[0], err[1] );
+	if( R )
+	{
+		out = srx_Replace( R, str, rep );
+		printf( " => '%s'\n", out );
+		srx_FreeReplaced( R, out );
+	}
+	else puts("");
+	if( R && ( flags & TEST_DUMP ) )
+	{
+		srx_DumpToStdout( R );
+		puts("");
+	}
+	srx_Destroy( R );
+	assert( memusage == 0 );
+}
 
 
 int main( int argc, char* argv[] )
 {
-	int flags = 0, i;
-	int err[2], col;
-	srx_Context* R;
-	
+	int i;
 	for( i = 1; i < argc; ++i )
 	{
 		if( STREQ( argv[i], "dump" ) )
@@ -142,6 +194,14 @@ int main( int argc, char* argv[] )
 	MATCHTEST( "<tag> b <tag>", "<([a-z]{1,5})>.*?<\\1>" );
 	MATCHTEST( "<tag> b <tag>", "[a-z]+" );
 	MATCHTEST( "<tag>some text</tag>", "<([a-z]+)>.*?</\\1>" );
+	MATCHTEST( " text", "\\*.*?\\*" );
+	MATCHTEST( "some *special* text", "\\*.*?\\*" );
+	MATCHTEST( "some *special* text", "\\*(.*?)\\*" );
+	
+	REPTEST( "some *special* text", "\\*.*?\\*", "SpEcIaL" );
+	REPTEST( "some *special* text", "\\*(.*?)\\*", "<b>\\1</b>" );
+	
+	assert( memusage == 0 );
 	
 	return 0;
 }
