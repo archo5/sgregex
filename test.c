@@ -129,9 +129,10 @@ void matchtest_ext( const char* str, const char* pat, const char* mod )
 void reptest_ext( const char* str, const char* pat, const char* mod, const char* rep )
 {
 	char* out;
-	col = printf( "replace test: '%s' like '%s' to '%s'", str, pat, rep );
+	col = printf( "replace test: '%s' like '%s'", str, pat );
 	if( mod )
 		col += printf( "(%s)", mod );
+	col += printf( " to '%s'", rep );
 	if( col > 40 )
 		col = 0;
 	else
@@ -235,6 +236,11 @@ int main( int argc, char* argv[] )
 	MATCHTEST2( "line 1\nline 2\nline 3", "^line 1$", "m" );
 	MATCHTEST2( "line 1\nline 2\nline 3", "^line 2$", "m" );
 	MATCHTEST2( "line 1\nline 2\nline 3", "^line 3$", "m" );
+	
+	/* random test cases (bugs and such) */
+	MATCHTEST2( "something awful", "([a-z]+)thing", "i" );
+	MATCHTEST2( " awful", "([a-z]+)thing", "i" );
+	REPTEST2( "something awful", "([a-z]+)thing", "i", "$1what" );
 	
 	assert( memusage == 0 );
 	
