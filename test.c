@@ -244,6 +244,8 @@ int main( int argc, char* argv[] )
 	
 	REPTEST( "`if/else`, `while`, `for`, `do/while`, `foreach`", "(^|[ \n\r\t,.])`([^`]+)`($|[ \n\r\t,.])", "$1##$2##$3" );
 	
+	MATCHTEST( "|  add                    |`   A  +  B    `|   arithmetic   |  no    |   2   |", "(`.*)\\|(.*`)" );
+	
 	assert( memusage == 0 );
 	
 	return 0;

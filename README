@@ -1,4 +1,4 @@
---- SGRegex [SRX] regular expression library v0.96b ---
+--- SGRegex [SRX] regular expression library v0.97b ---
 
 Simple and fully featured regular expression library with a minimalistic implementation in C.
 
@@ -19,6 +19,8 @@ support:
 - modifier "s" - dot includes newlines
 
 change log:
+0.97b:
+- fixed counter resetting (it is now done on backtracking)
 0.96b:
 - fixed a compilation issue, near-infinite loop bug in the last 2 test cases
 - added extensive debug logging (#define RXLOG 1 to enable)
