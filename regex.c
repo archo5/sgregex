@@ -550,7 +550,7 @@ static int regex_real_compile( srx_Context* R, int* cel, const RX_Char** pstr, i
 			}
 			else if( item && ( item->type == RIT_MATCH || item->type == RIT_RANGE || item->type == RIT_BKREF || item->type == RIT_SUBEXP ) )
 			{
-				int min, max;
+				int min = 1, max = 1;
 				if( *s == '{' )
 				{
 					int ctr;
@@ -906,7 +906,7 @@ RX_Char* srx_Replace( srx_Context* R, const RX_Char* str, const RX_Char* rep )
 	
 	while( *from )
 	{
-		const RX_Char* ofp, *ep, *rp;
+		const RX_Char* ofp = NULL, *ep = NULL, *rp;
 		if( !srx_Match( R, from, 0 ) )
 			break;
 		srx_GetCapturedPtrs( R, 0, &ofp, &ep );
