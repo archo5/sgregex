@@ -5,7 +5,7 @@
 #include "regex.c"
 
 
-int memusage = 0;
+size_t memusage = 0;
 
 void* testmemfunc( void* ud, void* ptr, size_t sz )
 {
