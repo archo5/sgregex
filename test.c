@@ -1,6 +1,5 @@
 
 #include <assert.h>
-#include <inttypes.h>
 
 #include "regex.c"
 
@@ -9,6 +8,7 @@ size_t memusage = 0;
 
 void* testmemfunc( void* ud, void* ptr, size_t sz )
 {
+	(void) ud;
 	if( ptr )
 	{
 		size_t* pp = (size_t*) ptr;
@@ -46,6 +46,7 @@ void mem_validate( byte* pp, byte bits, int numbytes, int region )
 
 void* testmemfunc2( void* ud, void* ptr, size_t sz )
 {
+	(void) ud;
 	if( ptr )
 	{
 		size_t* sp, size;

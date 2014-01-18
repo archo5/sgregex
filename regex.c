@@ -111,7 +111,7 @@ typedef struct _match_ctx
 match_ctx;
 
 
-static int regex_test( const RX_Char* str, match_ctx* ctx, int subexp );
+static int regex_test( const RX_Char* str, match_ctx* ctx );
 
 
 static int regex_match_once( match_ctx* ctx )
@@ -191,7 +191,7 @@ static int regex_match_once( match_ctx* ctx )
 				cc.item = item->ch;
 				cc.R = ctx->R;
 			}
-			if( regex_test( str, &cc, 1 ) )
+			if( regex_test( str, &cc ) )
 			{
 				regex_item* p = item->ch;
 				while( p->next )
@@ -218,7 +218,7 @@ static int regex_match_many( match_ctx* ctx )
 			cc.item = chi;
 			cc.R = ctx->R;
 		}
-		if( regex_test( item->matchbeg, &cc, 0 ) )
+		if( regex_test( item->matchbeg, &cc ) )
 		{
 			regex_item* p = chi;
 			while( p->next )
@@ -302,7 +302,7 @@ static int regex_subexp_backtrack( regex_item* item )
 	return !!p;
 }
 
-static int regex_test( const RX_Char* str, match_ctx* ctx, int subexp )
+static int regex_test( const RX_Char* str, match_ctx* ctx )
 {
 	regex_item* p = ctx->item;
 	p->matchbeg = str;
@@ -362,7 +362,7 @@ static int regex_test_start( const RX_Char* str, match_ctx* ctx )
 	regex_item* p = ctx->item;
 	RXLOGINFO( printf( "test start - counter reset\n" ) );
 	regex_reset_one( p );
-	return regex_test( str, ctx, 0 );
+	return regex_test( str, ctx );
 }
 
 
@@ -460,7 +460,7 @@ static int regex_real_compile( srx_Context* R, int* cel, const RX_Char** pstr, i
 	item->min = 1; \
 	item->max = 1;
 
-#define _RXE( err ) do{ error = err; goto fail; }while(1)
+#define _RXE( err ) for(;;){ error = err; goto fail; }
 	
 	const RX_Char* s = *pstr;
 	regex_item* item = NULL, *citem = NULL;
@@ -924,7 +924,7 @@ RX_Char* srx_Replace( srx_Context* R, const RX_Char* str, const RX_Char* rep )
 	size_t size = 0, mem = 0;
 	
 #define SR_CHKSZ( szext ) \
-	if( mem - size < szext ) \
+	if( (ptrdiff_t)( mem - size ) < (ptrdiff_t)(szext) ) \
 	{ \
 		size_t nsz = MAX( mem * 2, size + (size_t)(szext) ) + 1; \
 		RX_Char* nmem = RX_ALLOC_N( RX_Char, nsz ); \
