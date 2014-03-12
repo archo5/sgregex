@@ -19,6 +19,10 @@ support:
 - modifier "s" - dot includes newlines
 
 change log:
+0.98b:
+- fixed backtracing after breaking out of the subexpr. at the middle
+- improved on logging, added a memory limit, added test samples
+- fixed lots of compiler warnings
 0.97b:
 - fixed counter resetting (it is now done on backtracking)
 0.96b:
