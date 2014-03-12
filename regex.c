@@ -40,7 +40,7 @@
 #define RCF_DOTALL    0x04 /* "." is compiled as "[^]" instead of "[^\r\n]" */
 
 #ifndef RXLOG
-#define RXLOG 0
+#define RXLOG 1
 #endif
 
 #if RXLOG
@@ -119,7 +119,7 @@ static int regex_match_once( match_ctx* ctx )
 	int i;
 	regex_item* item = ctx->item;
 	const RX_Char* str = item->matchend;
-	RXLOGINFO( printf( "type %d action at %p (%.5s)\n", item->type, str, str ) );
+	RXLOGINFO( printf( "type %d char %d action at %p (%.5s)\n", item->type, (int) item->a, str, str ) );
 	switch( item->type )
 	{
 	case RIT_MATCH:
@@ -276,6 +276,7 @@ static int regex_subexp_backtrack( regex_item* item )
 	
 	while( p )
 	{
+		RXLOGINFO( printf( "backtracker at type %d char %d\n", p->type, (int) p->a ) );
 		if( chgh && p->type == RIT_SUBEXP && regex_subexp_backtrack( p ) )
 			break;
 		else if( p->flags & RIF_LAZY )
@@ -316,14 +317,21 @@ static int regex_test( const RX_Char* str, match_ctx* ctx )
 			cc.item = p;
 			cc.R = ctx->R;
 		}
+		RXLOGINFO( printf( "match_many: item %p type %d at position %p (%.5s)\n", (void*) p, p->type, p->matchbeg, p->matchbeg ) );
 		res = regex_match_many( &cc );
 		if( res < 0 )
+		{
+			RXLOGINFO( printf( "test of subexp %p FAILED\n", (void*) ctx->item ) );
 			return -1;
+		}
 		else if( res > 0 )
 		{
 			p = p->next;
 			if( !p )
+			{
+				RXLOGINFO( printf( "test of subexp %p SUCCEEDED\n", (void*) ctx->item ) );
 				return 1;
+			}
 			RXLOGINFO( printf( "moving on to type %d action\n", p->type ) );
 			p->matchbeg = p->prev->matchend;
 		}
@@ -352,7 +360,10 @@ static int regex_test( const RX_Char* str, match_ctx* ctx )
 				chgh = 1;
 			}
 			if( !p )
+			{
+				RXLOGINFO( printf( "test of subexp %p BT-ENDED\n", (void*) ctx->item ) );
 				return 0;
+			}
 		}
 	}
 }
@@ -771,6 +782,7 @@ fail:
 		errnpos[0] = (int)( uerr ? ( uerr & 0xf ) | 0xfffffff0 : 0 );
 		errnpos[1] = (int)( ( uerr & 0xfffffff0 ) >> 4 );
 	}
+	RXLOGINFO( srx_DumpToStdout(R) );
 	return R;
 }
 
