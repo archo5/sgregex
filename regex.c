@@ -40,7 +40,7 @@
 #define RCF_DOTALL    0x04 /* "." is compiled as "[^]" instead of "[^\r\n]" */
 
 #ifndef RXLOG
-#define RXLOG 1
+#define RXLOG 0
 #endif
 
 #if RXLOG
@@ -71,6 +71,7 @@ struct _regex_item
 	regex_item* prev;
 	regex_item* next;
 	regex_item* ch, *ch2;
+	regex_item* pos;
 	
 	RX_Char* range;
 	int count;
@@ -188,7 +189,7 @@ static int regex_match_once( match_ctx* ctx )
 			match_ctx cc;
 			{
 				cc.string = ctx->string;
-				cc.item = item->ch;
+				cc.item = item->pos;
 				cc.R = ctx->R;
 			}
 			if( regex_test( str, &cc ) )
@@ -196,6 +197,7 @@ static int regex_match_once( match_ctx* ctx )
 				regex_item* p = item->ch;
 				while( p->next )
 					p = p->next;
+				item->pos = p;
 				item->matchend = p->matchend;
 				return 1;
 			}
@@ -256,6 +258,7 @@ static void regex_reset_one( regex_item* p )
 {
 	if( p->ch ) regex_full_reset( p->ch );
 	if( p->ch2 ) regex_full_reset( p->ch2 );
+	p->pos = p->ch;
 	p->counter = p->flags & RIF_LAZY ? p->min : p->max;
 }
 static void regex_full_reset( regex_item* p )
@@ -270,9 +273,7 @@ static void regex_full_reset( regex_item* p )
 static int regex_subexp_backtrack( regex_item* item )
 {
 	int chgh = 0;
-	regex_item* p = item->ch;
-	while( p->next )
-		p = p->next;
+	regex_item* p = item->pos;
 	
 	while( p )
 	{
@@ -570,6 +571,7 @@ static int regex_real_compile( srx_Context* R, int* cel, const RX_Char** pstr, i
 				r = regex_real_compile( R, cel, &s, 1, &item->ch );
 				if( r )
 					_RXE( r );
+				item->pos = item->ch;
 				if( *s != ')' )
 					_RXE( RXEUNEXP );
 				if( cap >= 0 )
@@ -772,7 +774,7 @@ srx_Context* srx_CreateExt( const RX_Char* str, const RX_Char* mods, int* errnpo
 		item->type = RIT_SUBEXP;
 		item->min = 1;
 		item->max = 1;
-		item->ch = R->root;
+		item->pos = item->ch = R->root;
 		R->caps[ 0 ] = R->root = item;
 	}
 fail:
@@ -782,7 +784,7 @@ fail:
 		errnpos[0] = (int)( uerr ? ( uerr & 0xf ) | 0xfffffff0 : 0 );
 		errnpos[1] = (int)( ( uerr & 0xfffffff0 ) >> 4 );
 	}
-	RXLOGINFO( srx_DumpToStdout(R) );
+	RXLOGINFO( if( R ) srx_DumpToStdout(R) );
 	return R;
 }
 

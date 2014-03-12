@@ -22,6 +22,7 @@ void* testmemfunc( void* ud, void* ptr, size_t sz )
 		size_t* pp = (size_t*) ptr;
 		*pp = sz;
 		memusage += sz;
+		assert( memusage < 1024 * 1024 ); /* do not exceed 1 MB */
 		return pp+1;
 	}
 	return NULL;
@@ -170,37 +171,6 @@ int main( int argc, char* argv[] )
 			flags |= TEST_MONKEY;
 	}
 	
-	/*
-	MATCHTEST( "The C API has @\xFFseveral functions\xFF\xFDIterators\xFE used to deal with iterators. "
-		"There are essentially three kinds of functions: initialization (@\xFFPushIterator(P)\xFF, "
-		"@\xFFGetIterator(P)\xFF), advancing (@\xFFIterAdvance(P)\xFF) and data retrieval "
-		"(@\xFFIterPushData(P)\xFF, @\xFFIterGetData(P)\xFF).",
-		"(^|[ \xFF\xFC\n\r\t,.])@\xFF([^\xFF\xFD]+)\xFF(\xFD([^\xFE]+)\xFE)?($|[ \xFF\xFC\n\r\t,.])" );
-	
-	MATCHTEST( "The C API has @\"several functions\"<Iterators> used to deal with iterators. "
-		"There are essentially three kinds of functions: initialization (@\"PushIterator(P)\", "
-		"@\"GetIterator(P)\"), advancing (@\"IterAdvance(P)\") and data retrieval "
-		"(@\"IterPushData(P)\", @\"IterGetData(P)\").",
-		"(^|[ \"'\n\r\t,.])@\"([^\"<]+)\"(<([^>]+)>)?($|[ \"'\n\r\t,.])" );
-	
-	MATCHTEST( " @\"several functions\"<Iterators> ",
-		"@\"([^\"<]+)\"(<([^>]+)>)?($|[ \"'\n\r\t,.])" );
-	MATCHTEST( " @\"several functions\"<Iterators> ",
-		"@\"([^\"<]+)\"(<([^>]+)>)?($|[ \"'\n\r\t,.])" );
-	MATCHTEST( " @\"several functions\"<Iterators> ",
-		"(^|[ \"'\n\r\t,.])@\"([^\"<]+)\"(<([^>]+)>)?($|[ \"'\n\r\t,.])" );
-	*/
-	MATCHTEST( " @\xFFseveral functions\xFF<Iterators> ",
-		"[^\xFF]+\xFF(\xFD[^\xFE]+\xFE)? " );
-	MATCHTEST( " @\xFFseveral functions\xFF<Iterators> ",
-		"\xFF([^\xFF]+)\xFF(\xFD([^\xFE]+)\xFE)?($|[ ])" );
-	MATCHTEST( " @\xFFseveral functions\xFF<Iterators> ",
-		"@\xFF([^\xFF\xFD]+)\xFF(\xFD([^\xFE]+)\xFE)?($|[ \xFF\xFC\n\r\t,.])" );
-	MATCHTEST( " @\xFFseveral functions\xFF<Iterators> ",
-		"@\xFF([^\xFF\xFD]+)\xFF(\xFD([^\xFE]+)\xFE)?($|[ \xFF\xFC\n\r\t,.])" );
-	MATCHTEST( " @\xFFseveral functions\xFF<Iterators> ",
-		"(^|[ \xFF\xFC\n\r\t,.])@\xFF([^\xFF\xFD]+)\xFF(\xFD([^\xFE]+)\xFE)?($|[ \xFF\xFC\n\r\t,.])" );
-	
 	printf( "\n> compilation tests\n\n" );
 	COMPTEST( "" );
 	COMPTEST( "a" );
@@ -244,6 +214,36 @@ int main( int argc, char* argv[] )
 	MATCHTEST( " text", "\\*.*?\\*" );
 	MATCHTEST( "some *special* text", "\\*.*?\\*" );
 	MATCHTEST( "some *special* text", "\\*(.*?)\\*" );
+	
+	MATCHTEST( "The C API has @\xFFseveral functions\xFF\xFDIterators\xFE used to deal with iterators. "
+		"There are essentially three kinds of functions: initialization (@\xFFPushIterator(P)\xFF, "
+		"@\xFFGetIterator(P)\xFF), advancing (@\xFFIterAdvance(P)\xFF) and data retrieval "
+		"(@\xFFIterPushData(P)\xFF, @\xFFIterGetData(P)\xFF).",
+		"(^|[ \xFF\xFC\n\r\t,.])@\xFF([^\xFF\xFD]+)\xFF(\xFD([^\xFE]+)\xFE)?($|[ \xFF\xFC\n\r\t,.])" );
+	
+	MATCHTEST( "The C API has @\"several functions\"<Iterators> used to deal with iterators. "
+		"There are essentially three kinds of functions: initialization (@\"PushIterator(P)\", "
+		"@\"GetIterator(P)\"), advancing (@\"IterAdvance(P)\") and data retrieval "
+		"(@\"IterPushData(P)\", @\"IterGetData(P)\").",
+		"(^|[ \"'\n\r\t,.])@\"([^\"<]+)\"(<([^>]+)>)?($|[ \"'\n\r\t,.])" );
+	
+	MATCHTEST( " @\"several functions\"<Iterators> ",
+		"@\"([^\"<]+)\"(<([^>]+)>)?($|[ \"'\n\r\t,.])" );
+	MATCHTEST( " @\"several functions\"<Iterators> ",
+		"@\"([^\"<]+)\"(<([^>]+)>)?($|[ \"'\n\r\t,.])" );
+	MATCHTEST( " @\"several functions\"<Iterators> ",
+		"(^|[ \"'\n\r\t,.])@\"([^\"<]+)\"(<([^>]+)>)?($|[ \"'\n\r\t,.])" );
+	
+	MATCHTEST( " @\xFFseveral functions\xFF<Iterators> ",
+		"[^\xFF]+\xFF(\xFD[^\xFE]+\xFE)? " );
+	MATCHTEST( " @\xFFseveral functions\xFF<Iterators> ",
+		"\xFF([^\xFF]+)\xFF(\xFD([^\xFE]+)\xFE)?($|[ ])" );
+	MATCHTEST( " @\xFFseveral functions\xFF<Iterators> ",
+		"@\xFF([^\xFF\xFD]+)\xFF(\xFD([^\xFE]+)\xFE)?($|[ \xFF\xFC\n\r\t,.])" );
+	MATCHTEST( " @\xFFseveral functions\xFF<Iterators> ",
+		"@\xFF([^\xFF\xFD]+)\xFF(\xFD([^\xFE]+)\xFE)?($|[ \xFF\xFC\n\r\t,.])" );
+	MATCHTEST( " @\xFFseveral functions\xFF<Iterators> ",
+		"(^|[ \xFF\xFC\n\r\t,.])@\xFF([^\xFF\xFD]+)\xFF(\xFD([^\xFE]+)\xFE)?($|[ \xFF\xFC\n\r\t,.])" );
 	
 	printf( "\n> replacement tests\n\n" );
 	REPTEST( "some *special* text", "\\*.*?\\*", "SpEcIaL" );
