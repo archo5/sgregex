@@ -48,6 +48,7 @@
 #else
 #define RXLOGINFO( x )
 #endif
+#define RX_LOGLIM( str, strend, off ) ((strend)-(str)<(off)?(strend)-(str):(off)), str
 
 
 static int rx_isalpha( RX_Char c )
@@ -122,7 +123,8 @@ static int regex_match_once( match_ctx* ctx )
 	int i;
 	regex_item* item = ctx->item;
 	const RX_Char* str = item->matchend;
-	RXLOGINFO( printf( "type %d char %d action at %p (%.5s)\n", item->type, (int) item->a, str, str ) );
+	RXLOGINFO( printf( "type %d char %d action at %p (%.*s)\n",
+		item->type, (int) item->a, str, RX_LOGLIM(str,ctx->stringend,5) ) );
 	switch( item->type )
 	{
 	case RIT_MATCH:
@@ -328,7 +330,8 @@ static int regex_test( const RX_Char* str, match_ctx* ctx )
 			cc.item = p;
 			cc.R = ctx->R;
 		}
-		RXLOGINFO( printf( "match_many: item %p type %d at position %p (%.5s)\n", (void*) p, p->type, p->matchbeg, p->matchbeg ) );
+		RXLOGINFO( printf( "match_many: item %p type %d at position %p (%.*s)\n",
+			(void*) p, p->type, p->matchbeg, RX_LOGLIM(p->matchbeg,ctx->stringend,5) ) );
 		res = regex_match_many( &cc );
 		if( res < 0 )
 		{
