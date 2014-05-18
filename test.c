@@ -4,6 +4,13 @@
 #include "regex.c"
 
 
+#ifdef _WIN32
+# define MMF(x) x
+#else
+# define MMF(x) srx_DefaultMemFunc
+#endif
+
+
 size_t memusage = 0;
 
 void* testmemfunc( void* ud, void* ptr, size_t sz )
@@ -71,6 +78,21 @@ void* testmemfunc2( void* ud, void* ptr, size_t sz )
 }
 
 
+#define MEMFUNC MMF(testmemfunc2)
+#define MF_ALLOC( nb ) MEMFUNC(NULL,NULL,nb)
+#define MF_FREE( ptr ) MEMFUNC(NULL,ptr,0)
+
+
+char* MF_ALLOC_STRINGBUF( const char* str )
+{
+	size_t len = RX_STRLENGTHFUNC( str );
+	char* buf = MF_ALLOC( len );
+	memcpy( buf, str, len );
+	return buf;
+}
+
+
+
 #define TEST_DUMP 1
 #define TEST_MONKEY 2
 #define STREQ( a, b ) (strcmp(a,b)==0)
@@ -80,6 +102,7 @@ srx_Context* R;
 
 void comptest_ext( const char* pat, const char* mod )
 {
+	char* BUFpat = MF_ALLOC_STRINGBUF( pat );
 	col = printf( "compile test: '%s'", pat );
 	if( mod )
 		col += printf( "(%s)", mod );
@@ -87,7 +110,7 @@ void comptest_ext( const char* pat, const char* mod )
 		col = 0;
 	else
 		col = 25 - col;
-	R = srx_CreateExt( pat, mod, err, testmemfunc2, NULL );
+	R = srx_CreateExt( BUFpat, RX_STRLENGTHFUNC(pat), mod, err, MMF(testmemfunc2), NULL );
 	printf( "%*s output code: %d, position %d\n", col, "", err[0], err[1] );
 	if( R && ( flags & TEST_DUMP ) )
 	{
@@ -95,6 +118,7 @@ void comptest_ext( const char* pat, const char* mod )
 		puts("");
 	}
 	srx_Destroy( R );
+	MF_FREE( BUFpat );
 	assert( memusage == 0 );
 }
 #define COMPTEST( pat ) comptest_ext( pat, NULL )
@@ -102,6 +126,8 @@ void comptest_ext( const char* pat, const char* mod )
 
 void matchtest_ext( const char* str, const char* pat, const char* mod )
 {
+	char* BUFstr = MF_ALLOC_STRINGBUF( str );
+	char* BUFpat = MF_ALLOC_STRINGBUF( pat );
 	col = printf( "match test: '%s' like '%s'", str, pat );
 	if( mod )
 		col += printf( "(%s)", mod );
@@ -109,11 +135,11 @@ void matchtest_ext( const char* str, const char* pat, const char* mod )
 		col = 0;
 	else
 		col = 35 - col;
-	R = srx_CreateExt( pat, mod, err, testmemfunc2, NULL );
+	R = srx_CreateExt( BUFpat, RX_STRLENGTHFUNC(pat), mod, err, MMF(testmemfunc2), NULL );
 	printf( "%*s output code: %d, position %d", col, "", err[0], err[1] );
 	if( R )
 	{
-		printf( ", match: %s\n", srx_Match( R, str, 0 ) ? "TRUE" : "FALSE" );
+		printf( ", match: %s\n", srx_MatchExt( R, BUFstr, RX_STRLENGTHFUNC(str), 0 ) ? "TRUE" : "FALSE" );
 	}
 	else
 		puts("");
@@ -123,6 +149,8 @@ void matchtest_ext( const char* str, const char* pat, const char* mod )
 		puts("");
 	}
 	srx_Destroy( R );
+	MF_FREE( BUFstr );
+	MF_FREE( BUFpat );
 	assert( memusage == 0 );
 }
 #define MATCHTEST( str, pat ) matchtest_ext( str, pat, NULL )
@@ -130,6 +158,9 @@ void matchtest_ext( const char* str, const char* pat, const char* mod )
 
 void reptest_ext( const char* str, const char* pat, const char* mod, const char* rep )
 {
+	char* BUFstr = MF_ALLOC_STRINGBUF( str );
+	char* BUFpat = MF_ALLOC_STRINGBUF( pat );
+	char* BUFrep = MF_ALLOC_STRINGBUF( rep );
 	char* out;
 	col = printf( "replace test: '%s' like '%s'", str, pat );
 	if( mod )
@@ -139,12 +170,13 @@ void reptest_ext( const char* str, const char* pat, const char* mod, const char*
 		col = 0;
 	else
 		col = 35 - col;
-	R = srx_CreateExt( pat, mod, err, testmemfunc2, NULL );
+	R = srx_CreateExt( BUFpat, RX_STRLENGTHFUNC(pat), mod, err, MMF(testmemfunc2), NULL );
 	printf( "%*s output code: %d, position %d", col, "", err[0], err[1] );
 	if( R )
 	{
-		out = srx_Replace( R, str, rep );
-		printf( " => '%s'\n", out );
+		size_t outsize = 0;
+		out = srx_ReplaceExt( R, BUFstr, RX_STRLENGTHFUNC(str), BUFrep, RX_STRLENGTHFUNC(rep), &outsize );
+		printf( " => [%d] '%s'\n", (int) outsize, out );
 		srx_FreeReplaced( R, out );
 	}
 	else puts("");
@@ -154,6 +186,9 @@ void reptest_ext( const char* str, const char* pat, const char* mod, const char*
 		puts("");
 	}
 	srx_Destroy( R );
+	MF_FREE( BUFstr );
+	MF_FREE( BUFpat );
+	MF_FREE( BUFrep );
 	assert( memusage == 0 );
 }
 #define REPTEST( str, pat, rep ) reptest_ext( str, pat, NULL, rep )
@@ -277,6 +312,8 @@ int main( int argc, char* argv[] )
 	REPTEST( "`if/else`, `while`, `for`, `do/while`, `foreach`", "(^|[ \n\r\t,.])`([^`]+)`($|[ \n\r\t,.])", "$1##$2##$3" );
 	
 	MATCHTEST( "|  add                    |`   A  +  B    `|   arithmetic   |  no    |   2   |", "(`.*)\\|(.*`)" );
+	
+	REPTEST( "SGScript API", "[^a-zA-Z0-9]+", "-" );
 	
 	assert( memusage == 0 );
 	
