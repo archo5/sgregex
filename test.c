@@ -304,7 +304,15 @@ int main( int argc, char* argv[] )
 	MATCHTEST2( "line 1\nline 2\nline 3", "^line 2$", "m" );
 	MATCHTEST2( "line 1\nline 2\nline 3", "^line 3$", "m" );
 	
+	/* new features */
+	printf( "\n> feature tests\n\n" );
+	REPTEST( "test 55 cc", "\\d+", "+" );
+	REPTEST( "test 66 cc", "[\\d]+", "!" );
+	REPTEST( "aasd 453 dasf78adsf", "\\w+", "[word:$0]" );
+	REPTEST( "abc 234\tdef1", "\\H+", "[not-hspace:$0]" );
+	
 	/* random test cases (bugs and such) */
+	printf( "\n> bug tests\n\n" );
 	MATCHTEST2( "something awful", "([a-z]+)thing", "i" );
 	MATCHTEST2( " awful", "([a-z]+)thing", "i" );
 	REPTEST2( "something awful", "([a-z]+)thing", "i", "$1what" );
