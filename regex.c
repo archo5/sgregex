@@ -206,7 +206,7 @@ static int regex_match_once( match_ctx* ctx )
 				regex_item* p = item->ch;
 				while( p->next )
 					p = p->next;
-				item->pos = p;
+				item->pos = item->ch;
 				item->matchend = p->matchend;
 				return 1;
 			}
@@ -887,8 +887,8 @@ static void regex_dump_item( regex_item* item, int lev )
 {
 	const char* types[] =
 	{
-		"-", "MATCH", "RANGE", "SPCBEG", "SPCEND", "BKREF", "-", "-", "-", "-",
-		"-", "EITHER", "SUBEXP", "-"
+		"-", "MATCH (1)", "RANGE (2)", "SPCBEG (3)", "SPCEND (4)", "BKREF (5)", "-", "-", "-", "-",
+		"-", "EITHER (11)", "SUBEXP (12)", "-"
 	};
 	
 	int l = lev;
