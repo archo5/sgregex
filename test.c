@@ -338,6 +338,11 @@ int main( int argc, char* argv[] )
 	MATCHTEST( "ABXC", RX2 );
 	MATCHTEST( "ABXBXC", RX2 );
 	
+	MATCHTEST( "|`     ! A      `|",
+		"(`.*)!(.*`)" );
+	REPTEST( "|`     ! A      `|",
+		"(`.*)!(.*`)", "$1-~EXCL~-$2" );
+	
 	assert( memusage == 0 );
 	
 	return 0;

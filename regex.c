@@ -48,7 +48,7 @@
 #else
 #define RXLOGINFO( x )
 #endif
-#define RX_LOGLIM( str, strend, off ) ((strend)-(str)<(off)?(strend)-(str):(off)), str
+#define RX_LOGLIM( str, strend, off ) (int)((strend)-(str)<(off)?(strend)-(str):(off)), str
 
 
 static int rx_isalpha( RX_Char c )
@@ -123,8 +123,8 @@ static int regex_match_once( match_ctx* ctx )
 	int i;
 	regex_item* item = ctx->item;
 	const RX_Char* str = item->matchend;
-	RXLOGINFO( printf( "type %d char %d action at %p (%.*s)\n",
-		item->type, (int) item->a, str, RX_LOGLIM(str,ctx->stringend,5) ) );
+	RXLOGINFO( printf( "type %d char %d('%c') action at %p (%.*s)\n",
+		item->type, (int) item->a, item->a, str, RX_LOGLIM(str,ctx->stringend,5) ) );
 	switch( item->type )
 	{
 	case RIT_MATCH:
@@ -198,7 +198,7 @@ static int regex_match_once( match_ctx* ctx )
 			{
 				cc.string = ctx->string;
 				cc.stringend = ctx->stringend;
-				cc.item = item->pos;
+				cc.item = item->pos ? item->pos : item->ch;
 				cc.R = ctx->R;
 			}
 			if( regex_test( str, &cc ) )
@@ -206,7 +206,7 @@ static int regex_match_once( match_ctx* ctx )
 				regex_item* p = item->ch;
 				while( p->next )
 					p = p->next;
-				item->pos = item->ch;
+				item->pos = NULL;
 				item->matchend = p->matchend;
 				return 1;
 			}
@@ -218,6 +218,7 @@ static int regex_match_once( match_ctx* ctx )
 
 static int regex_match_many( match_ctx* ctx )
 {
+	/* returns whether matched */
 	regex_item* item = ctx->item;
 	item->matchend = item->matchbeg;
 	if( item->type == RIT_EITHER )
@@ -281,10 +282,18 @@ static void regex_full_reset( regex_item* p )
 	}
 }
 
+static regex_item* regex_lastch( regex_item* item )
+{
+	regex_item* p = item->ch;
+	while( p && p->next )
+		p = p->next;
+	return p;
+}
+
 static int regex_subexp_backtrack( regex_item* item )
 {
 	int chgh = 0;
-	regex_item* p = item->pos;
+	regex_item* p = item->pos ? item->pos : regex_lastch( item );
 	
 	while( p )
 	{
@@ -333,12 +342,7 @@ static int regex_test( const RX_Char* str, match_ctx* ctx )
 		RXLOGINFO( printf( "match_many: item %p type %d at position %p (%.*s)\n",
 			(void*) p, p->type, p->matchbeg, RX_LOGLIM(p->matchbeg,ctx->stringend,5) ) );
 		res = regex_match_many( &cc );
-		if( res < 0 )
-		{
-			RXLOGINFO( printf( "test of subexp %p FAILED\n", (void*) ctx->item ) );
-			return -1;
-		}
-		else if( res > 0 )
+		if( res )
 		{
 			p = p->next;
 			if( !p )
