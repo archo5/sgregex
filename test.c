@@ -304,7 +304,15 @@ int main( int argc, char* argv[] )
 	MATCHTEST2( "line 1\nline 2\nline 3", "^line 2$", "m" );
 	MATCHTEST2( "line 1\nline 2\nline 3", "^line 3$", "m" );
 	
+	/* new features */
+	printf( "\n> feature tests\n\n" );
+	REPTEST( "test 55 cc", "\\d+", "+" );
+	REPTEST( "test 66 cc", "[\\d]+", "!" );
+	REPTEST( "aasd 453 dasf78adsf", "\\w+", "[word:$0]" );
+	REPTEST( "abc 234\tdef1", "\\H+", "[not-hspace:$0]" );
+	
 	/* random test cases (bugs and such) */
+	printf( "\n> bug tests\n\n" );
 	MATCHTEST2( "something awful", "([a-z]+)thing", "i" );
 	MATCHTEST2( " awful", "([a-z]+)thing", "i" );
 	REPTEST2( "something awful", "([a-z]+)thing", "i", "$1what" );
@@ -314,6 +322,21 @@ int main( int argc, char* argv[] )
 	MATCHTEST( "|  add                    |`   A  +  B    `|   arithmetic   |  no    |   2   |", "(`.*)\\|(.*`)" );
 	
 	REPTEST( "SGScript API", "[^a-zA-Z0-9]+", "-" );
+	
+#define RX0 "(^\\+[0-9]{2}|^\\+[0-9]{2}\\(0\\)|^\\(\\+[0-9]{2}\\)\\(0\\)|^00[0-9]{2}|^0)([0-9]{9}$|[- 0-9]{10}$)"
+	MATCHTEST( "+31235256677", RX0 );
+	MATCHTEST( "+31(0)235256677", RX0 );
+	MATCHTEST( "023-5256677", RX0 );
+#define RX1 "^\\$(\\d{1,3}(\\,\\d{3})*|(\\d+))(\\.\\d{2})?$"
+	MATCHTEST( "$0.84", RX1 );
+	MATCHTEST( "$123458", RX1 );
+	MATCHTEST( "$1,234.89", RX1 );
+	MATCHTEST( "$123,456.89", RX1 );
+	MATCHTEST( "$1,234,567.89", RX1 );
+#define RX2 "^A(BX)*C$"
+	MATCHTEST( "AC", RX2 );
+	MATCHTEST( "ABXC", RX2 );
+	MATCHTEST( "ABXBXC", RX2 );
 	
 	assert( memusage == 0 );
 	
