@@ -343,6 +343,10 @@ int main( int argc, char* argv[] )
 	REPTEST( "|`     ! A      `|",
 		"(`.*)!(.*`)", "$1-~EXCL~-$2" );
 	
+	/* THESE DO NOT WORK */
+	/*MATCHTEST( " aaa = 0,", "(a+)( +)?," );*/
+	/*MATCHTEST( ", asdf qwe = 0,", " +([a-zA-Z0-9_*& ]+?) +([a-zA-Z0-9_]+)( += +)?," );*/
+	
 	assert( memusage == 0 );
 	
 	return 0;
