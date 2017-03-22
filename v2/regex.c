@@ -15,6 +15,7 @@
 
 
 #define RX_MAX_CAPTURES 10
+#define RX_MAX_SUBEXPRS 255
 #define RX_MAX_REPEATS 0xffffffff
 #define RX_NULL_OFFSET 0xffffffff
 
@@ -27,12 +28,15 @@
 #define RX_OP_MATCH_CHARSET     1 /* [...] / character ranges */
 #define RX_OP_MATCH_CHARSET_INV 2 /* [^...] / inverse character ranges */
 #define RX_OP_MATCH_STRING      3 /* plain sequence of non-special characters */
-#define RX_OP_REPEAT_GREEDY     4 /* try repeated match before proceeding */
-#define RX_OP_REPEAT_LAZY       5 /* try proceeding before repeated match */
-#define RX_OP_JUMP              6 /* jump to the specified instruction */
-#define RX_OP_BACKTRK_JUMP      7 /* jump if backtracked */
-#define RX_OP_CAPTURE_START     8 /* save starting position of capture range */
-#define RX_OP_CAPTURE_END       9 /* save ending position of capture range */
+#define RX_OP_MATCH_BACKREF     4 /* previously found capture group */
+#define RX_OP_MATCH_SLSTART     5 /* string / line start */
+#define RX_OP_MATCH_SLEND       6 /* string / line end */
+#define RX_OP_REPEAT_GREEDY     7 /* try repeated match before proceeding */
+#define RX_OP_REPEAT_LAZY       8 /* try proceeding before repeated match */
+#define RX_OP_JUMP              9 /* jump to the specified instruction */
+#define RX_OP_BACKTRK_JUMP     10 /* jump if backtracked */
+#define RX_OP_CAPTURE_START    11 /* save starting position of capture range */
+#define RX_OP_CAPTURE_END      12 /* save ending position of capture range */
 
 
 typedef struct rxInstr
@@ -54,6 +58,13 @@ typedef struct rxState
 }
 rxState;
 
+typedef struct rxSubexpr
+{
+	uint32_t start;
+	uint8_t  capture_slot;
+}
+rxSubexp;
+
 typedef struct rxCompiler
 {
 	srx_MemFunc memfn;
@@ -71,6 +82,9 @@ typedef struct rxCompiler
 	uint8_t    capture_count;
 	int        errcode;
 	int        errpos;
+	
+	rxSubexp   subexprs[ RX_MAX_SUBEXPRS ];
+	int        subexprs_count;
 }
 rxCompiler;
 
@@ -103,6 +117,8 @@ typedef struct rxExecute rxExecute;
 #define RX_NUM_ITERS( e ) ((e)->iternum[ (e)->iternum_count - 1 ])
 #define RX_LAST_STATE( e ) ((e)->states[ (e)->states_count - 1 ])
 
+
+#define rxIsDigit( v ) ((v) >= '0' && (v) <= '9')
 
 static int rxMatchCharset( const rxChar* ch, const rxChar* charset, size_t cslen )
 {
@@ -163,6 +179,18 @@ void rxDumpToFile( rxInstr* instrs, rxChar* chars, FILE* fp )
 			fprintf( fp, ")\n" );
 			break;
 			
+		case RX_OP_MATCH_BACKREF:
+			fprintf( fp, "MATCH_BACKREF (slot=%d)\n", (int) ip->from );
+			break;
+			
+		case RX_OP_MATCH_SLSTART:
+			fprintf( fp, "MATCH_SLSTART\n" );
+			break;
+			
+		case RX_OP_MATCH_SLEND:
+			fprintf( fp, "MATCH_SLEND\n" );
+			break;
+			
 		case RX_OP_REPEAT_GREEDY:
 			fprintf( fp, "REPEAT_GREEDY (%u-%u, jump=%u)\n", (unsigned) ip->from, (unsigned) ip->len, (unsigned) ip->start );
 			break;
@@ -213,6 +241,10 @@ static void rxInitCompiler( rxCompiler* c, srx_MemFunc memfn, void* memctx )
 	c->capture_count = 0;
 	c->errcode = RXSUCCESS;
 	c->errpos = 0;
+	
+	c->subexprs_count = 1;
+	c->subexprs[ 0 ].start = 1;
+	c->subexprs[ 0 ].capture_slot = 0;
 }
 
 static void rxFreeCompiler( rxCompiler* c )
@@ -373,22 +405,46 @@ static void rxCompile( rxCompiler* c, const rxChar* str, size_t strsize )
 			c->errpos = s - str;
 			return;
 			
+		case '^':
+			RX_LOG(printf("[^] START (LINE/STRING)\n"));
+			
+			rxPushInstr( c, RX_OP_MATCH_SLSTART, 0, 0, 0 );
+			empty = 0;
+			s++;
+			break;
+			
+		case '$':
+			RX_LOG(printf("[$] END (LINE/STRING)\n"));
+			
+			rxPushInstr( c, RX_OP_MATCH_SLEND, 0, 0, 0 );
+			empty = 0;
+			s++;
+			break;
+			
 		case '(':
 			RX_LOG(printf("[(] CAPTURE_START\n"));
 			
+			if( c->subexprs_count >= RX_MAX_SUBEXPRS )
+				goto over_limit;
+			
+			c->subexprs[ c->subexprs_count ].capture_slot = 0;
 			if( c->capture_count < RX_MAX_CAPTURES )
 			{
 				rxPushInstr( c, RX_OP_CAPTURE_START, 0, c->capture_count, 0 );
+				c->subexprs[ c->subexprs_count ].capture_slot = c->capture_count;
 				c->capture_count++;
 			}
+			c->subexprs[ c->subexprs_count ].start = c->instrs_count;
+			
+			c->subexprs_count++;
 			s++;
 			break;
 			
 		case ')':
 			RX_LOG(printf("[)] CAPTURE_END\n"));
 			
-			/* TODO: fix capture count */
-			rxPushInstr( c, RX_OP_CAPTURE_END, 0, c->capture_count, 0 );
+			c->subexprs_count--;
+			rxPushInstr( c, RX_OP_CAPTURE_END, 0, c->subexprs[ c->subexprs_count ].capture_slot, 0 );
 			s++;
 			break;
 			
@@ -402,7 +458,9 @@ static void rxCompile( rxCompiler* c, const rxChar* str, size_t strsize )
 			}
 			/* pass thru */
 		
+		case '+':
 		case '*':
+		case '{':
 			RX_LOG(printf("[*+{?] REPEATS\n"));
 			
 			/* already has a repeat as last op */
@@ -415,13 +473,67 @@ static void rxCompile( rxCompiler* c, const rxChar* str, size_t strsize )
 			if( c->instrs_count &&
 				RX_LAST_INSTR( c ).op != RX_OP_MATCH_STRING &&
 				RX_LAST_INSTR( c ).op != RX_OP_MATCH_CHARSET &&
-				RX_LAST_INSTR( c ).op != RX_OP_MATCH_CHARSET_INV )
+				RX_LAST_INSTR( c ).op != RX_OP_MATCH_CHARSET_INV &&
+				RX_LAST_INSTR( c ).op != RX_OP_MATCH_BACKREF )
 			{
 				goto unexpected_token;
 			}
 			
-			rxInsertInstr( c, c->instrs_count - 1, RX_OP_JUMP, c->instrs_count + 1, 0, 0 );
-			rxPushInstr( c, RX_OP_REPEAT_GREEDY, c->instrs_count - 1, 0, RX_MAX_REPEATS );
+			/* state validated, add repeats */
+			{
+				uint32_t min = 0, max = RX_MAX_REPEATS;
+				if( *s == '*' ){}
+				else if( *s == '+' ){ min = 1; }
+				else if( *s == '?' ){ max = 0; }
+				else if( *s == '{' )
+				{
+					RX_SAFE_INCR( s );
+					if( !rxIsDigit( *s ) )
+						goto unexpected_token;
+					min = 0;
+					while( rxIsDigit( *s ) )
+					{
+						uint32_t nmin = min * 10 + *s - '0';
+						if( nmin < min )
+							goto over_limit;
+						min = nmin;
+						RX_SAFE_INCR( s );
+					}
+					if( *s == ',' )
+					{
+						RX_SAFE_INCR( s );
+						if( *s == '}' )
+							max = RX_MAX_REPEATS;
+						else
+						{
+							if( !rxIsDigit( *s ) )
+								goto unexpected_token;
+							max = 0;
+							while( rxIsDigit( *s ) )
+							{
+								uint32_t nmax = max * 10 + *s - '0';
+								if( nmax < max )
+									goto over_limit;
+								max = nmax;
+								RX_SAFE_INCR( s );
+							}
+							if( min > max )
+							{
+								c->errcode = RXERANGE;
+								c->errpos = s - str;
+								return;
+							}
+						}
+					}
+					else
+						max = min;
+					if( *s != '}' )
+						goto unexpected_token;
+				}
+				
+				rxInsertInstr( c, c->instrs_count - 1, RX_OP_JUMP, c->instrs_count + 1, 0, 0 );
+				rxPushInstr( c, RX_OP_REPEAT_GREEDY, c->instrs_count - 1, min, max );
+			}
 			s++;
 			break;
 			
@@ -440,6 +552,79 @@ static void rxCompile( rxCompiler* c, const rxChar* str, size_t strsize )
 			}
 			s++;
 			break;
+			
+		case '\\':
+			RX_SAFE_INCR( s );
+			if( *s == '.' )
+			{
+				rxPushInstr( c, RX_OP_MATCH_STRING, 0, c->chars_count, 0 );
+				rxPushChar( c, *s++ );
+				break;
+			}
+			else if( rxIsDigit( *s ) )
+			{
+				int dig = *s++ - '0';
+				if( dig == 0 || dig >= c->capture_count )
+				{
+					c->errcode = RXENOREF;
+					c->errpos = s - str;
+					return;
+				}
+				rxPushInstr( c, RX_OP_MATCH_BACKREF, 0, dig, 0 );
+				break;
+			}
+			else if( *s == 'd' || *s == 'D' )
+			{
+				rxPushInstr( c, *s == 'd' ? RX_OP_MATCH_CHARSET : RX_OP_MATCH_CHARSET_INV, 0, c->chars_count, 2 );
+				rxPushChar( c, '0' );
+				rxPushChar( c, '9' );
+				s++;
+				break;
+			}
+			else if( *s == 'h' || *s == 'H' )
+			{
+				rxPushInstr( c, *s == 'h' ? RX_OP_MATCH_CHARSET : RX_OP_MATCH_CHARSET_INV, 0, c->chars_count, 4 );
+				rxPushChar( c, '\t' );
+				rxPushChar( c, '\t' );
+				rxPushChar( c, ' ' );
+				rxPushChar( c, ' ' );
+				s++;
+				break;
+			}
+			else if( *s == 'v' || *s == 'V' )
+			{
+				rxPushInstr( c, *s == 'v' ? RX_OP_MATCH_CHARSET : RX_OP_MATCH_CHARSET_INV, 0, c->chars_count, 2 );
+				rxPushChar( c, 0x0A );
+				rxPushChar( c, 0x0D );
+				s++;
+				break;
+			}
+			else if( *s == 's' || *s == 'S' )
+			{
+				rxPushInstr( c, *s == 's' ? RX_OP_MATCH_CHARSET : RX_OP_MATCH_CHARSET_INV, 0, c->chars_count, 4 );
+				rxPushChar( c, 0x09 );
+				rxPushChar( c, 0x0D );
+				rxPushChar( c, ' ' );
+				rxPushChar( c, ' ' );
+				s++;
+				break;
+			}
+			else if( *s == 'w' || *s == 'W' )
+			{
+				rxPushInstr( c, *s == 'w' ? RX_OP_MATCH_CHARSET : RX_OP_MATCH_CHARSET_INV, 0, c->chars_count, 8 );
+				rxPushChar( c, 'a' );
+				rxPushChar( c, 'z' );
+				rxPushChar( c, 'A' );
+				rxPushChar( c, 'Z' );
+				rxPushChar( c, '0' );
+				rxPushChar( c, '9' );
+				rxPushChar( c, '_' );
+				rxPushChar( c, '_' );
+				s++;
+				break;
+			}
+			/* TODO: more character classes */
+			/* fallback to character output */
 			
 		default:
 			RX_LOG(printf("CHAR '%c' (string fallback)\n", *s));
@@ -470,6 +655,10 @@ reached_end_too_soon:
 	return;
 unexpected_token:
 	c->errcode = RXEUNEXP;
+	c->errpos = s - str;
+	return;
+over_limit:
+	c->errcode = RXELIMIT;
 	c->errpos = s - str;
 	return;
 }
@@ -563,12 +752,12 @@ static void rxPushIterCnt( rxExecute* e, uint32_t it )
 #  define RX_POP_ITER_CNT( e ) assert((e)->iternum_count-- < 0xffffffff)
 #endif
 
-static int rxExecDo( rxExecute* e, const rxChar* str, size_t str_size )
+static int rxExecDo( rxExecute* e, const rxChar* str, const rxChar* soff, size_t str_size )
 {
 	const rxInstr* instrs = e->instrs;
 	const rxChar* chars = e->chars;
 	
-	rxPushState( e, 0, 0 );
+	rxPushState( e, soff - str, 0 );
 	
 	while( e->states_count )
 	{
@@ -608,13 +797,73 @@ static int rxExecDo( rxExecute* e, const rxChar* str, size_t str_size )
 			RX_LOG(printf("MATCH_STRING at=%d size=%d: ",s->off,op->len));
 			match = str_size >= s->off + op->len;
 			if( match )
-				match = memcmp( str + s->off, &chars[ op->from ], op->len ) == 0;
+				match = memcmp( &str[ s->off ], &chars[ op->from ], op->len ) == 0;
 			RX_LOG(printf("%s\n", match ? "MATCHED" : "FAILED"));
 			
 			if( match )
 			{
 				/* replace current single path state with next */
 				s->off += op->len;
+				s->instr++;
+				continue;
+			}
+			else goto did_not_match;
+			
+		case RX_OP_MATCH_BACKREF:
+			RX_LOG(printf("MATCH_BACKREF at=%d slot=%d: ",s->off,op->from));
+			match = e->captures[ op->from ][0] != RX_NULL_OFFSET
+				&& e->captures[ op->from ][1] != RX_NULL_OFFSET;
+			{
+				size_t len = e->captures[ op->from ][1] - e->captures[ op->from ][0];
+				printf("~~~len=%d\n",len);
+				if( match )
+				{
+					match = str_size >= s->off + len;
+					if( match )
+						match = memcmp( &str[ s->off ], &str[ e->captures[ op->from ][0] ], len ) == 0;
+				}
+				RX_LOG(printf("%s\n", match ? "MATCHED" : "FAILED"));
+			
+				if( match )
+				{
+					/* replace current single path state with next */
+					s->off += len;
+					s->instr++;
+					continue;
+				}
+				else goto did_not_match;
+			}
+			
+		case RX_OP_MATCH_SLSTART:
+			RX_LOG(printf("MATCH_SLSTART at=%d: ",s->off));
+			match = s->off == 0;
+			if( e->flags & RCF_MULTILINE && s->off < str_size && ( str[ s->off ] == '\n' || str[ s->off ] == '\r' ) )
+			{
+				if( ((size_t)( s->off + 1 )) < str_size && str[ s->off ] == '\r' && str[ s->off + 1 ] == '\n' )
+					s->off++;
+				s->off++;
+				match = 1;
+			}
+			RX_LOG(printf("%s\n", match ? "MATCHED" : "FAILED"));
+			
+			if( match )
+			{
+				s->instr++;
+				continue;
+			}
+			else goto did_not_match;
+			
+		case RX_OP_MATCH_SLEND:
+			RX_LOG(printf("MATCH_SLEND at=%d: ",s->off));
+			match = s->off == str_size;
+			if( e->flags & RCF_MULTILINE && s->off < str_size && ( str[ s->off ] == '\n' || str[ s->off ] == '\r' ) )
+			{
+				match = 1;
+			}
+			RX_LOG(printf("%s\n", match ? "MATCHED" : "FAILED"));
+			
+			if( match )
+			{
 				s->instr++;
 				continue;
 			}
@@ -805,14 +1054,15 @@ void srx_DumpToFile( srx_Context* R, FILE* fp )
 
 int srx_MatchExt( srx_Context* R, const rxChar* str, size_t size, size_t offset )
 {
+	const rxChar* strstart = str;
 	const rxChar* strend = str + size;
 	if( offset > size )
 		return 0;
-	R->str = str;
+	R->str = strstart;
 	str += offset;
 	while( str < strend )
 	{
-		if( rxExecDo( R, str, size ) )
+		if( rxExecDo( R, strstart, str, size ) )
 			return 1;
 		str++;
 	}
@@ -881,7 +1131,7 @@ rxChar* srx_ReplaceExt( srx_Context* R, const rxChar* str, size_t strsize, const
 			rxChar rc = *rp;
 			if( ( rc == '\\' || rc == '$' ) && rp + 1 < repend )
 			{
-				if( rp[1] >= '0' && rp[1] <= '9' )
+				if( rxIsDigit( rp[1] ) )
 				{
 					int dig = rp[1] - '0';
 					const rxChar *brp, *erp;
