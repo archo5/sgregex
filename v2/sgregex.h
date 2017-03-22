@@ -58,6 +58,13 @@ void srx_DumpToFile( srx_Context* R, FILE* fp );
 
 int srx_MatchExt( srx_Context* R, const rxChar* str, size_t size, size_t offset );
 #define srx_Match( R, str, off ) srx_MatchExt( R, str, RX_STRLENGTHFUNC(str), off )
+int srx_GetCaptureCount( srx_Context* R );
+int srx_GetCaptured( srx_Context* R, int which, size_t* pbeg, size_t* pend );
+int srx_GetCapturedPtrs( srx_Context* R, int which, const rxChar** pbeg, const rxChar** pend );
+
+rxChar* srx_ReplaceExt( srx_Context* R, const rxChar* str, size_t strsize, const rxChar* rep, size_t repsize, size_t* outsize );
+#define srx_Replace( R, str, rep ) srx_ReplaceExt( R, str, RX_STRLENGTHFUNC(str), rep, RX_STRLENGTHFUNC(rep), NULL )
+void srx_FreeReplaced( srx_Context* R, rxChar* repstr );
 
 
 #ifdef __cplusplus

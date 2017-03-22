@@ -4,13 +4,14 @@
 static void _failed( const char* msg, int line ){ printf( "\nERROR: condition failed - \"%s\"\n\tline %d\n", msg, line ); exit( 1 ); }
 #define RX_ASSERT( cond ) if( !(cond) ) _failed( #cond, __LINE__ ); else printf( "+" );
 #define SLB( s ) s, sizeof(s)-1
-int rxTest2( rxExecute* e, rxInstr* ins, rxChar* chr, const char* s )
+static int rxTest2( rxExecute* e, rxInstr* ins, rxChar* chr, const char* s )
 {
 	int i, ret;
 	
 	printf( "#" );
 	rxInitExecute( e, srx_DefaultMemFunc, NULL, ins, chr );
-	ret = rxExecDo( e, s, s, strlen( s ) );
+	e->str = s;
+	ret = rxExecDo( e, s, strlen( s ) );
 	for( i = 0; i < RX_MAX_CAPTURES; ++i )
 	{
 		if( e->captures[ i ][0] != RX_NULL_OFFSET || e->captures[ i ][1] != RX_NULL_OFFSET )
@@ -27,23 +28,46 @@ int rxTest2( rxExecute* e, rxInstr* ins, rxChar* chr, const char* s )
 	}
 	return ret;
 }
-int rxTest( rxInstr* ins, rxChar* chr, const char* s )
+static void rxFreeExecMNO( rxExecute* e )
+{
+	e->instrs = NULL; /* prevent this from a free() attempt */
+	e->chars = NULL;
+	rxFreeExecute( e );
+}
+static int rxTest( rxInstr* ins, rxChar* chr, const char* s )
 {
 	rxExecute e;
 	int ret = rxTest2( &e, ins, chr, s );
-	rxFreeExecute( &e );
+	rxFreeExecMNO( &e );
 	return ret;
 }
 
-int rxCompTest2( const char* expr, const char* mods, rxInstr* instrs, size_t ilen, rxChar* chars )
+char* allocNNT( const char* str, size_t* len )
+{
+	*len = strlen( str );
+	char* out = (char*) malloc( *len + 1 );
+	strcpy( out, str );
+	out[ *len ] = 0x8A;
+	return out;
+}
+
+static int rxCompTest2( const char* expr, const char* mods, rxInstr* instrs, size_t ilen, rxChar* chars )
 {
 	size_t i, exprlen = strlen( expr );
-	char* exprNNT = (char*) malloc( exprlen + 1 );
-	strcpy( exprNNT, expr );
-	exprNNT[ exprlen ] = 0x8A;
+	char* exprNNT = allocNNT( expr, &exprlen );
 	
 	rxCompiler c;
 	rxInitCompiler( &c, srx_DefaultMemFunc, NULL );
+	while( *mods )
+	{
+		switch( *mods )
+		{
+		case 'm': c.flags |= RCF_MULTILINE; break;
+		case 'i': c.flags |= RCF_CASELESS; break;
+		case 's': c.flags |= RCF_DOTALL; break;
+		}
+		mods++;
+	}
 	rxCompile( &c, exprNNT, exprlen );
 	if( c.errcode != RXSUCCESS )
 	{
@@ -84,10 +108,50 @@ int rxCompTest2( const char* expr, const char* mods, rxInstr* instrs, size_t ile
 	return c.errcode; /* assuming rxFreeCompiler does not nuke this */
 }
 
-int rxCompTest( const char* expr, const char* mods )
+static int rxCompTest( const char* expr, const char* mods )
 {
 	return rxCompTest2( expr, mods, NULL, 0, NULL );
 }
+
+
+#define TEST_DUMP 1
+int err[2], col, flags = 0;
+srx_Context* R;
+
+static void comptest_ext( const char* pat, const char* mod, int retcode )
+{
+	size_t patlen;
+	char* patNNT = allocNNT( pat, &patlen );
+	
+	col = printf( "compile test: '%s'", pat );
+	if( mod )
+		col += printf( "(%s)", mod );
+	if( col > 25 )
+		col = 0;
+	else
+		col = 25 - col;
+	R = srx_CreateExt( patNNT, patlen, mod, err, NULL, NULL );
+	if( err[0] != retcode )
+	{
+		printf( " ^ return code = %d, return offset = %d\n", err[0], err[1] );
+	}
+	RX_ASSERT( err[0] == retcode );
+	
+	printf( "%*s output code: %d, position %d\n", col, "", err[0], err[1] );
+	
+	if( R && ( flags & TEST_DUMP ) )
+	{
+		srx_DumpToStdout( R );
+		puts("");
+	}
+	
+	if( R )
+		srx_Destroy( R );
+	
+	free( patNNT );
+}
+#define COMPTEST( pat, err ) comptest_ext( pat, NULL, err )
+#define COMPTEST2( pat, mod, err ) comptest_ext( pat, mod, err )
 
 
 int main()
@@ -243,7 +307,7 @@ int main()
 			RX_ASSERT( e.captures[1][1] == 4 );
 			RX_ASSERT( e.captures[2][0] == RX_NULL_OFFSET );
 			RX_ASSERT( e.captures[2][1] == RX_NULL_OFFSET );
-			rxFreeExecute( &e );
+			rxFreeExecMNO( &e );
 			
 			/* test if changes are reverted */
 			RX_ASSERT( rxTest2( &e, instrs, chars, "abc" ) == 0 );
@@ -253,7 +317,7 @@ int main()
 			RX_ASSERT( e.captures[1][1] == RX_NULL_OFFSET );
 			RX_ASSERT( e.captures[2][0] == RX_NULL_OFFSET );
 			RX_ASSERT( e.captures[2][1] == RX_NULL_OFFSET );
-			rxFreeExecute( &e );
+			rxFreeExecMNO( &e );
 		}
 	}
 	puts( "" );
@@ -282,7 +346,7 @@ int main()
 			RX_ASSERT( e.captures[1][1] == RX_NULL_OFFSET );
 			RX_ASSERT( e.captures[2][0] == RX_NULL_OFFSET );
 			RX_ASSERT( e.captures[2][1] == RX_NULL_OFFSET );
-			rxFreeExecute( &e );
+			rxFreeExecMNO( &e );
 			
 			RX_ASSERT( rxTest2( &e, instrs, chars, "cd" ) == 1 );
 			RX_ASSERT( e.captures[0][0] == RX_NULL_OFFSET );
@@ -291,7 +355,7 @@ int main()
 			RX_ASSERT( e.captures[1][1] == 2 );
 			RX_ASSERT( e.captures[2][0] == RX_NULL_OFFSET );
 			RX_ASSERT( e.captures[2][1] == RX_NULL_OFFSET );
-			rxFreeExecute( &e );
+			rxFreeExecMNO( &e );
 			
 			RX_ASSERT( rxTest2( &e, instrs, chars, "ac" ) == 0 );
 			RX_ASSERT( e.captures[0][0] == RX_NULL_OFFSET );
@@ -300,7 +364,7 @@ int main()
 			RX_ASSERT( e.captures[1][1] == RX_NULL_OFFSET );
 			RX_ASSERT( e.captures[2][0] == RX_NULL_OFFSET );
 			RX_ASSERT( e.captures[2][1] == RX_NULL_OFFSET );
-			rxFreeExecute( &e );
+			rxFreeExecMNO( &e );
 		}
 	}
 	puts( "" );
@@ -325,21 +389,21 @@ int main()
 			RX_ASSERT( e.captures[0][1] == 2 );
 			RX_ASSERT( e.captures[1][0] == RX_NULL_OFFSET );
 			RX_ASSERT( e.captures[1][1] == RX_NULL_OFFSET );
-			rxFreeExecute( &e );
+			rxFreeExecMNO( &e );
 			
 			RX_ASSERT( rxTest2( &e, instrs, chars, "cd" ) == 1 );
 			RX_ASSERT( e.captures[0][0] == 0 );
 			RX_ASSERT( e.captures[0][1] == 2 );
 			RX_ASSERT( e.captures[1][0] == RX_NULL_OFFSET );
 			RX_ASSERT( e.captures[1][1] == RX_NULL_OFFSET );
-			rxFreeExecute( &e );
+			rxFreeExecMNO( &e );
 			
 			RX_ASSERT( rxTest2( &e, instrs, chars, "ac" ) == 0 );
 			RX_ASSERT( e.captures[0][0] == RX_NULL_OFFSET );
 			RX_ASSERT( e.captures[0][1] == RX_NULL_OFFSET );
 			RX_ASSERT( e.captures[1][0] == RX_NULL_OFFSET );
 			RX_ASSERT( e.captures[1][1] == RX_NULL_OFFSET );
-			rxFreeExecute( &e );
+			rxFreeExecMNO( &e );
 		}
 	}
 	puts( "" );
@@ -435,6 +499,25 @@ int main()
 		RX_ASSERT( rxCompTest2( "aa[b]", "", instrs, 5, "aabb" ) == RXSUCCESS );
 	}
 	puts( "" );
+	
+	puts( "##### REGEX USAGE tests #####" );
+	
+	COMPTEST( "", RXEEMPTY );
+	COMPTEST( "a", RXSUCCESS );
+	COMPTEST( "[a-z]", RXSUCCESS );
+	COMPTEST( "[^a-z]", RXSUCCESS );
+	COMPTEST( "[^a-z]*", RXSUCCESS );
+	COMPTEST( "*", RXEUNEXP );
+	COMPTEST( "(a)", RXSUCCESS );
+	COMPTEST( "(.)(.)", RXSUCCESS );
+	/* COMPTEST( "a{1,2}" ); */
+	COMPTEST( "5*?", RXSUCCESS );
+	COMPTEST( ".*?", RXSUCCESS );
+	/* COMPTEST( "^.*X.*$" ); */
+	COMPTEST( ".*?*", RXEUNEXP );
+	COMPTEST( "[-z]", RXSUCCESS );
+	COMPTEST( "[a-]", RXSUCCESS );
+	COMPTEST( "[^]z]", RXSUCCESS );
 	
 	puts( "=== all tests done! ===" );
 	
