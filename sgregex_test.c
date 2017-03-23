@@ -1,5 +1,5 @@
 
-#include "regex.c"
+#include "sgregex.c"
 
 static void _failed( const char* msg, int line ){ printf( "\nERROR: condition failed - \"%s\"\n\tline %d\n", msg, line ); exit( 1 ); }
 #define RX_ASSERT( cond ) if( !(cond) ) _failed( #cond, __LINE__ ); else printf( "+" );
