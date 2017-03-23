@@ -44,10 +44,11 @@ static int rxTest( rxInstr* ins, rxChar* chr, const char* s )
 
 char* allocNNT( const char* str, size_t* len )
 {
+	char* out;
 	*len = strlen( str );
-	char* out = (char*) malloc( *len + 1 );
+	out = (char*) malloc( *len + 1 );
 	strcpy( out, str );
-	out[ *len ] = 0x8A;
+	out[ *len ] = (char) 0x8A;
 	return out;
 }
 
@@ -188,13 +189,13 @@ void matchtest_ext( const char* mst, const char* pat, const char* mod, int ismat
 
 void reptest_ext( const char* mst, const char* pat, const char* mod, const char* rep, const char* res )
 {
-	size_t mstlen, patlen, replen, reslen;
+	char* out;
+	size_t mstlen, patlen, replen, reslen, outsize = 0;
 	char* mstNNT = allocNNT( mst, &mstlen );
 	char* patNNT = allocNNT( pat, &patlen );
 	char* repNNT = allocNNT( rep, &replen );
 	reslen = strlen( res );
 	
-	char* out;
 	col = printf( "replace test: '%s' like '%s'", mst, pat );
 	if( mod )
 		col += printf( "(%s)", mod );
@@ -206,7 +207,6 @@ void reptest_ext( const char* mst, const char* pat, const char* mod, const char*
 	R = srx_CreateExt( patNNT, patlen, mod, err, NULL, NULL );
 	RX_ASSERT( R );
 	
-	size_t outsize = 0;
 	out = srx_ReplaceExt( R, mstNNT, mstlen, repNNT, replen, &outsize );
 	RX_ASSERT( out && outsize );
 	printf( " => [%d] '%s'\n", (int) outsize, out );
@@ -675,12 +675,12 @@ int main()
 	
 	printf( "\n> modifier tests\n\n" );
 	/* modifier - 'i' */
-	/* COMPTEST2( "A", "i", RXSUCCESS );
+	COMPTEST2( "A", "i", RXSUCCESS );
 	COMPTEST2( "[a-z]", "i", RXSUCCESS );
 	MATCHTEST2( "Cat", "A", "i", 1 );
 	MATCHTEST2( "CAT", "a", "i", 1 );
 	MATCHTEST2( "X", "[a-z]", "i", 1 );
-	REPTEST2( "some text here", "[a-z]+", "i", "\\\\($0)$$" ); TODO */
+	REPTEST2( "some text here", "[a-z]+", "i", "\\\\($0)$$", "\\(some)$ \\(text)$ \\(here)$" );
 	
 	/* modifier - 's' */
 	COMPTEST2( ".", "s", RXSUCCESS );
@@ -696,9 +696,17 @@ int main()
 	/* new features */
 	printf( "\n> feature tests\n\n" );
 	REPTEST( "test 55 cc", "\\d+", "+", "test + cc" );
-	/* REPTEST( "test 66 cc", "[\\d]+", "!", "test ! cc" ); TODO */
+	REPTEST( "test 66 cc", "[\\d]+", "!", "test ! cc" );
 	REPTEST( "aasd 453 dasf78adsf", "\\w+", "[word:$0]", "[word:aasd] [word:453] [word:dasf78adsf]" );
 	REPTEST( "abc 234\tdef1", "\\H+", "[not-hspace:$0]", "[not-hspace:abc] [not-hspace:234]\t[not-hspace:def1]" );
+	
+	/* tests taken from other libraries */
+	printf( "\n> misc. tests\n\n" );
+	
+	MATCHTEST( "feb 6,", "(^|[ (,;])((([Ff]eb[^ ]* *|0*2/|\\* */?)0*[6-7]))([^0-9]|$)", 1 );
+	MATCHTEST( "2/7", "(^|[ (,;])((([Ff]eb[^ ]* *|0*2/|\\* */?)0*[6-7]))([^0-9]|$)", 1 );
+	MATCHTEST( "feb 1,Feb 6", "(^|[ (,;])((([Ff]eb[^ ]* *|0*2/|\\* */?)0*[6-7]))([^0-9]|$)", 1 );
+	MATCHTEST( "x", "((((((((((((((((((((((((((((((x))))))))))))))))))))))))))))))", 1 );
 	
 	/* random test cases (bugs and such) */
 	printf( "\n> bug tests\n\n" );
@@ -714,10 +722,6 @@ int main()
 	
 	REPTEST( "SGScript API", "[^a-zA-Z0-9]+", "-", "SGScript-API" );
 	
-#define RX0 "(^\\+[0-9]{2}|^\\+[0-9]{2}\\(0\\)|^\\(\\+[0-9]{2}\\)\\(0\\)|^00[0-9]{2}|^0)([0-9]{9}$|[- 0-9]{10}$)"
-	MATCHTEST( "+31235256677", RX0, 1 );
-	MATCHTEST( "+31(0)235256677", RX0, 1 );
-	MATCHTEST( "023-5256677", RX0, 1 );
 #define RX1 "^\\$(\\d{1,3}(\\,\\d{3})*|(\\d+))(\\.\\d{2})?$"
 	MATCHTEST( "$0.84", RX1, 1 );
 	MATCHTEST( "$123458", RX1, 1 );
@@ -736,6 +740,19 @@ int main()
 		"|`     -~EXCL~- A      `|" );
 	MATCHTEST( " aaa = 0,", "(a+)( +)?,", 0 );
 	MATCHTEST( ", asdf qwe = 0,", " +([a-zA-Z0-9_*& ]+?) +([a-zA-Z0-9_]+)( += +)?,", 0 );
+	
+	/* http://www.regexlib.com/REDetails.aspx?regexp_id=75 */
+#define ISSUE_2_REGEX "(^\\+[0-9]{2}|^\\+[0-9]{2}\\(0\\)|^\\(\\+[0-9]{2}\\)\\(0\\)|^00[0-9]{2}|^0)([0-9]{9}$|[0-9\\-\\s]{10}$)"
+	COMPTEST( ISSUE_2_REGEX, RXSUCCESS );
+	MATCHTEST( "+31235256677", ISSUE_2_REGEX, 1 );
+	MATCHTEST( "+31(0)235256677", ISSUE_2_REGEX, 1 );
+	MATCHTEST( "023-5256677", ISSUE_2_REGEX, 1 );
+	MATCHTEST( "+3123525667788999", ISSUE_2_REGEX, 0 );
+	MATCHTEST( "3123525667788", ISSUE_2_REGEX, 0 );
+	MATCHTEST( "232-2566778", ISSUE_2_REGEX, 0 );
+	
+	MATCHTEST( "const char* name, bool* p_open = NULL, ImGuiWindowFlags flags = 0,",
+		" +([a-zA-Z0-9_*& ]+?) +([a-zA-Z0-9_]+)( += +)?,", 1 );
 	
 	puts( "=== all tests done! ===" );
 	
