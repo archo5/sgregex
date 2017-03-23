@@ -18,6 +18,7 @@
 #define RX_MAX_SUBEXPRS 255
 #define RX_MAX_REPEATS 0xffffffff
 #define RX_NULL_OFFSET 0xffffffff
+#define RX_NULL_INSTROFF 0x0fffffff
 
 #define RCF_MULTILINE 0x01 /* ^/$ matches beginning/end of line too */
 #define RCF_CASELESS  0x02 /* pre-equalized case for match/range */
@@ -61,6 +62,8 @@ rxState;
 typedef struct rxSubexpr
 {
 	uint32_t start;
+	uint32_t section_start;
+	uint32_t repeat_start;
 	uint8_t  capture_slot;
 }
 rxSubexp;
@@ -88,8 +91,9 @@ typedef struct rxCompiler
 }
 rxCompiler;
 
-#define RX_LAST_INSTR( e ) ((e)->instrs[ (e)->instrs_count - 1 ])
-#define RX_LAST_CHAR( e ) ((e)->chars[ (e)->chars_count - 1 ])
+#define RX_LAST_INSTR( c ) ((c)->instrs[ (c)->instrs_count - 1 ])
+#define RX_LAST_CHAR( c ) ((c)->chars[ (c)->chars_count - 1 ])
+#define RX_LAST_SUBEXPR( c ) ((c)->subexprs[ (c)->subexprs_count - 1 ])
 
 struct rxExecute
 {
@@ -156,10 +160,10 @@ void rxDumpToFile( rxInstr* instrs, rxChar* chars, FILE* fp )
 			for( i = ip->from; i < ip->from + ip->len; ++i )
 			{
 				rxChar ch = chars[ i ];
-				if( i % 2 == 1 )
+				if( ( i - ip->from ) % 2 == 1 )
 					fprintf( fp, "-" );
 				if( ch < 32 || ch > 126 )
-					fprintf( fp, "[%u]", (unsigned) ch );
+					fprintf( fp, "[%u]", (unsigned) (rxUChar) ch );
 				else
 					fprintf( fp, "%c", ch );
 			}
@@ -172,7 +176,7 @@ void rxDumpToFile( rxInstr* instrs, rxChar* chars, FILE* fp )
 			{
 				rxChar ch = chars[ i ];
 				if( ch < 32 || ch > 126 )
-					fprintf( fp, "[%u]", (unsigned) ch );
+					fprintf( fp, "[%u]", (unsigned) (rxUChar) ch );
 				else
 					fprintf( fp, "%c", ch );
 			}
@@ -244,6 +248,8 @@ static void rxInitCompiler( rxCompiler* c, srx_MemFunc memfn, void* memctx )
 	
 	c->subexprs_count = 1;
 	c->subexprs[ 0 ].start = 1;
+	c->subexprs[ 0 ].section_start = 1;
+	c->subexprs[ 0 ].repeat_start = 1;
 	c->subexprs[ 0 ].capture_slot = 0;
 }
 
@@ -299,7 +305,8 @@ static void rxInsertInstr( rxCompiler* c, uint32_t pos, uint32_t op, uint32_t st
 	for( i = 0; i < c->instrs_count; ++i )
 	{
 		/* any refs to instructions after the split should be fixed */
-		if( c->instrs[ i ].start >= pos &&
+		if( c->instrs[ i ].start > pos &&
+			c->instrs[ i ].start != RX_NULL_INSTROFF &&
 			RX_INSTR_REFS_OTHER( c->instrs[ i ].op ) )
 			c->instrs[ i ].start++;
 	}
@@ -350,7 +357,6 @@ static void rxCompile( rxCompiler* c, const rxChar* str, size_t strsize )
 				uint32_t op = RX_OP_MATCH_CHARSET;
 				uint32_t start = c->chars_count;
 				
-				empty = 0;
 				RX_LOG(printf("CHAR '['\n"));
 				
 				RX_SAFE_INCR( s );
@@ -394,6 +400,7 @@ static void rxCompile( rxCompiler* c, const rxChar* str, size_t strsize )
 					s++; /* incr may be unsafe as ending here is valid */
 				
 				rxPushInstr( c, op, 0, start, c->chars_count - start );
+				RX_LAST_SUBEXPR( c ).repeat_start = c->instrs_count - 1;
 			}
 			break;
 			
@@ -409,6 +416,7 @@ static void rxCompile( rxCompiler* c, const rxChar* str, size_t strsize )
 			RX_LOG(printf("[^] START (LINE/STRING)\n"));
 			
 			rxPushInstr( c, RX_OP_MATCH_SLSTART, 0, 0, 0 );
+			RX_LAST_SUBEXPR( c ).repeat_start = c->instrs_count;
 			empty = 0;
 			s++;
 			break;
@@ -417,6 +425,7 @@ static void rxCompile( rxCompiler* c, const rxChar* str, size_t strsize )
 			RX_LOG(printf("[$] END (LINE/STRING)\n"));
 			
 			rxPushInstr( c, RX_OP_MATCH_SLEND, 0, 0, 0 );
+			RX_LAST_SUBEXPR( c ).repeat_start = c->instrs_count;
 			empty = 0;
 			s++;
 			break;
@@ -427,6 +436,7 @@ static void rxCompile( rxCompiler* c, const rxChar* str, size_t strsize )
 			if( c->subexprs_count >= RX_MAX_SUBEXPRS )
 				goto over_limit;
 			
+			RX_LAST_SUBEXPR( c ).repeat_start = c->instrs_count;
 			c->subexprs[ c->subexprs_count ].capture_slot = 0;
 			if( c->capture_count < RX_MAX_CAPTURES )
 			{
@@ -435,6 +445,8 @@ static void rxCompile( rxCompiler* c, const rxChar* str, size_t strsize )
 				c->capture_count++;
 			}
 			c->subexprs[ c->subexprs_count ].start = c->instrs_count;
+			c->subexprs[ c->subexprs_count ].section_start = c->instrs_count;
+			c->subexprs[ c->subexprs_count ].repeat_start = c->instrs_count;
 			
 			c->subexprs_count++;
 			s++;
@@ -443,8 +455,36 @@ static void rxCompile( rxCompiler* c, const rxChar* str, size_t strsize )
 		case ')':
 			RX_LOG(printf("[)] CAPTURE_END\n"));
 			
+			if( c->subexprs_count < 2 ||
+				RX_LAST_SUBEXPR( c ).section_start == c->instrs_count )
+				goto unexpected_token;
+			
+			/* fix OR jumps */
+			{
+				size_t i;
+				for( i = RX_LAST_SUBEXPR( c ).start; i < c->instrs_count; ++i )
+				{
+					if( c->instrs[ i ].op == RX_OP_JUMP &&
+						c->instrs[ i ].start == RX_NULL_INSTROFF )
+						c->instrs[ i ].start = c->instrs_count;
+				}
+			}
+			
 			c->subexprs_count--;
 			rxPushInstr( c, RX_OP_CAPTURE_END, 0, c->subexprs[ c->subexprs_count ].capture_slot, 0 );
+			s++;
+			break;
+			
+		case '|':
+			RX_LOG(printf("[|] OR\n"));
+			
+			if( RX_LAST_SUBEXPR( c ).section_start == c->instrs_count )
+				goto unexpected_token;
+			
+			rxPushInstr( c, RX_OP_JUMP, RX_NULL_INSTROFF, 0, 0 );
+			rxInsertInstr( c, RX_LAST_SUBEXPR( c ).section_start, RX_OP_BACKTRK_JUMP, c->instrs_count + 1, 0, 0 );
+			RX_LAST_SUBEXPR( c ).section_start = c->instrs_count;
+			RX_LAST_SUBEXPR( c ).repeat_start = c->instrs_count;
 			s++;
 			break;
 			
@@ -469,12 +509,8 @@ static void rxCompile( rxCompiler* c, const rxChar* str, size_t strsize )
 			{
 				goto unexpected_token;
 			}
-			/* must have something to repeat (TODO: support subexprs) */
-			if( c->instrs_count &&
-				RX_LAST_INSTR( c ).op != RX_OP_MATCH_STRING &&
-				RX_LAST_INSTR( c ).op != RX_OP_MATCH_CHARSET &&
-				RX_LAST_INSTR( c ).op != RX_OP_MATCH_CHARSET_INV &&
-				RX_LAST_INSTR( c ).op != RX_OP_MATCH_BACKREF )
+			
+			if( c->instrs_count == RX_LAST_SUBEXPR( c ).repeat_start )
 			{
 				goto unexpected_token;
 			}
@@ -484,7 +520,7 @@ static void rxCompile( rxCompiler* c, const rxChar* str, size_t strsize )
 				uint32_t min = 0, max = RX_MAX_REPEATS;
 				if( *s == '*' ){}
 				else if( *s == '+' ){ min = 1; }
-				else if( *s == '?' ){ max = 0; }
+				else if( *s == '?' ){ max = 1; }
 				else if( *s == '{' )
 				{
 					RX_SAFE_INCR( s );
@@ -531,15 +567,15 @@ static void rxCompile( rxCompiler* c, const rxChar* str, size_t strsize )
 						goto unexpected_token;
 				}
 				
-				rxInsertInstr( c, c->instrs_count - 1, RX_OP_JUMP, c->instrs_count + 1, 0, 0 );
-				rxPushInstr( c, RX_OP_REPEAT_GREEDY, c->instrs_count - 1, min, max );
+				rxInsertInstr( c, RX_LAST_SUBEXPR( c ).repeat_start, RX_OP_JUMP, c->instrs_count + 1, 0, 0 );
+				rxPushInstr( c, RX_OP_REPEAT_GREEDY, RX_LAST_SUBEXPR( c ).repeat_start + 1, min, max );
 			}
+			RX_LAST_SUBEXPR( c ).repeat_start = c->instrs_count;
 			s++;
 			break;
 			
 		case '.':
 			RX_LOG(printf("DOT\n"));
-			empty = 0;
 			if( c->flags & RCF_DOTALL )
 				rxPushInstr( c, RX_OP_MATCH_CHARSET_INV, 0, c->chars_count, 0 );
 			else
@@ -550,15 +586,18 @@ static void rxCompile( rxCompiler* c, const rxChar* str, size_t strsize )
 				rxPushChar( c, '\r' );
 				rxPushInstr( c, RX_OP_MATCH_CHARSET_INV, 0, c->chars_count - 4, 4 );
 			}
+			RX_LAST_SUBEXPR( c ).repeat_start = c->instrs_count - 1;
 			s++;
 			break;
 			
 		case '\\':
+			RX_LOG(printf("BACKSLASH\n"));
 			RX_SAFE_INCR( s );
 			if( *s == '.' )
 			{
-				rxPushInstr( c, RX_OP_MATCH_STRING, 0, c->chars_count, 0 );
+				rxPushInstr( c, RX_OP_MATCH_STRING, 0, c->chars_count, 1 );
 				rxPushChar( c, *s++ );
+				RX_LAST_SUBEXPR( c ).repeat_start = c->instrs_count - 1;
 				break;
 			}
 			else if( rxIsDigit( *s ) )
@@ -571,6 +610,7 @@ static void rxCompile( rxCompiler* c, const rxChar* str, size_t strsize )
 					return;
 				}
 				rxPushInstr( c, RX_OP_MATCH_BACKREF, 0, dig, 0 );
+				RX_LAST_SUBEXPR( c ).repeat_start = c->instrs_count - 1;
 				break;
 			}
 			else if( *s == 'd' || *s == 'D' )
@@ -578,6 +618,7 @@ static void rxCompile( rxCompiler* c, const rxChar* str, size_t strsize )
 				rxPushInstr( c, *s == 'd' ? RX_OP_MATCH_CHARSET : RX_OP_MATCH_CHARSET_INV, 0, c->chars_count, 2 );
 				rxPushChar( c, '0' );
 				rxPushChar( c, '9' );
+				RX_LAST_SUBEXPR( c ).repeat_start = c->instrs_count - 1;
 				s++;
 				break;
 			}
@@ -588,6 +629,7 @@ static void rxCompile( rxCompiler* c, const rxChar* str, size_t strsize )
 				rxPushChar( c, '\t' );
 				rxPushChar( c, ' ' );
 				rxPushChar( c, ' ' );
+				RX_LAST_SUBEXPR( c ).repeat_start = c->instrs_count - 1;
 				s++;
 				break;
 			}
@@ -596,6 +638,7 @@ static void rxCompile( rxCompiler* c, const rxChar* str, size_t strsize )
 				rxPushInstr( c, *s == 'v' ? RX_OP_MATCH_CHARSET : RX_OP_MATCH_CHARSET_INV, 0, c->chars_count, 2 );
 				rxPushChar( c, 0x0A );
 				rxPushChar( c, 0x0D );
+				RX_LAST_SUBEXPR( c ).repeat_start = c->instrs_count - 1;
 				s++;
 				break;
 			}
@@ -606,6 +649,7 @@ static void rxCompile( rxCompiler* c, const rxChar* str, size_t strsize )
 				rxPushChar( c, 0x0D );
 				rxPushChar( c, ' ' );
 				rxPushChar( c, ' ' );
+				RX_LAST_SUBEXPR( c ).repeat_start = c->instrs_count - 1;
 				s++;
 				break;
 			}
@@ -620,6 +664,7 @@ static void rxCompile( rxCompiler* c, const rxChar* str, size_t strsize )
 				rxPushChar( c, '9' );
 				rxPushChar( c, '_' );
 				rxPushChar( c, '_' );
+				RX_LAST_SUBEXPR( c ).repeat_start = c->instrs_count - 1;
 				s++;
 				break;
 			}
@@ -629,11 +674,17 @@ static void rxCompile( rxCompiler* c, const rxChar* str, size_t strsize )
 		default:
 			RX_LOG(printf("CHAR '%c' (string fallback)\n", *s));
 			
-			empty = 0;
 			rxPushInstr( c, RX_OP_MATCH_STRING, 0, c->chars_count, 1 );
 			rxPushChar( c, *s++ );
+			RX_LAST_SUBEXPR( c ).repeat_start = c->instrs_count - 1;
 			break;
 		}
+		
+		if( empty &&
+			c->instrs_count &&
+			RX_LAST_INSTR( c ).op != RX_OP_CAPTURE_END &&
+			RX_LAST_SUBEXPR( c ).repeat_start < c->instrs_count )
+			empty = 0;
 	}
 	
 	if( empty )
@@ -642,6 +693,24 @@ static void rxCompile( rxCompiler* c, const rxChar* str, size_t strsize )
 		c->errcode = RXEEMPTY;
 		c->errpos = 0;
 		return;
+	}
+	
+	if( RX_LAST_SUBEXPR( c ).section_start == c->instrs_count )
+	{
+		c->errcode = RXEPART;
+		c->errpos = s - str;
+		return;
+	}
+	
+	/* fix OR jumps */
+	{
+		size_t i;
+		for( i = RX_LAST_SUBEXPR( c ).start; i < c->instrs_count; ++i )
+		{
+			if( c->instrs[ i ].op == RX_OP_JUMP &&
+				c->instrs[ i ].start == RX_NULL_INSTROFF )
+				c->instrs[ i ].start = c->instrs_count;
+		}
 	}
 	
 	RX_LOG(printf("COMPILE END (last capture)\n"));
@@ -664,10 +733,18 @@ over_limit:
 }
 
 
-static void rxInitExecute( rxExecute* e, srx_MemFunc memfn, void* memctx, rxInstr* instrs, rxChar* chars )
+static void rxResetCaptures( rxExecute* e )
 {
 	int i;
-	
+	for( i = 0; i < RX_MAX_CAPTURES; ++i )
+	{
+		e->captures[ i ][0] = RX_NULL_OFFSET;
+		e->captures[ i ][1] = RX_NULL_OFFSET;
+	}
+}
+
+static void rxInitExecute( rxExecute* e, srx_MemFunc memfn, void* memctx, rxInstr* instrs, rxChar* chars )
+{
 	e->memfn = memfn;
 	e->memctx = memctx;
 	
@@ -683,11 +760,7 @@ static void rxInitExecute( rxExecute* e, srx_MemFunc memfn, void* memctx, rxInst
 	e->iternum_count = 0;
 	e->iternum_mem = 0;
 	
-	for( i = 0; i < RX_MAX_CAPTURES; ++i )
-	{
-		e->captures[ i ][0] = RX_NULL_OFFSET;
-		e->captures[ i ][1] = RX_NULL_OFFSET;
-	}
+	rxResetCaptures( e );
 }
 
 static void rxFreeExecute( rxExecute* e )
@@ -770,6 +843,7 @@ static int rxExecDo( rxExecute* e, const rxChar* str, const rxChar* soff, size_t
 		{
 		case RX_OP_MATCH_DONE:
 			RX_LOG(printf("MATCH_DONE\n"));
+			e->states_count = 0;
 			return 1;
 			
 		case RX_OP_MATCH_CHARSET:
@@ -981,6 +1055,7 @@ did_not_match:
 		e->states[ e->states_count - 1 ].flags |= RX_STATE_BACKTRACKED;
 	}
 	
+	assert( e->states_count == 0 );
 	return 0;
 }
 
@@ -1060,10 +1135,15 @@ int srx_MatchExt( srx_Context* R, const rxChar* str, size_t size, size_t offset 
 		return 0;
 	R->str = strstart;
 	str += offset;
+	rxResetCaptures( R );
 	while( str < strend )
 	{
 		if( rxExecDo( R, strstart, str, size ) )
+		{
+			assert( R->captures[ 0 ][0] != RX_NULL_OFFSET );
+			assert( R->captures[ 0 ][1] != RX_NULL_OFFSET );
 			return 1;
+		}
 		str++;
 	}
 	return 0;

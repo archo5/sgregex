@@ -186,6 +186,48 @@ void matchtest_ext( const char* mst, const char* pat, const char* mod, int ismat
 #define MATCHTEST( mst, pat, ismatch ) matchtest_ext( mst, pat, NULL, ismatch )
 #define MATCHTEST2( mst, pat, mod, ismatch ) matchtest_ext( mst, pat, mod, ismatch )
 
+void reptest_ext( const char* mst, const char* pat, const char* mod, const char* rep, const char* res )
+{
+	size_t mstlen, patlen, replen, reslen;
+	char* mstNNT = allocNNT( mst, &mstlen );
+	char* patNNT = allocNNT( pat, &patlen );
+	char* repNNT = allocNNT( rep, &replen );
+	reslen = strlen( res );
+	
+	char* out;
+	col = printf( "replace test: '%s' like '%s'", mst, pat );
+	if( mod )
+		col += printf( "(%s)", mod );
+	col += printf( " to '%s'", rep );
+	if( col > 40 )
+		col = 0;
+	else
+		col = 35 - col;
+	R = srx_CreateExt( patNNT, patlen, mod, err, NULL, NULL );
+	RX_ASSERT( R );
+	
+	size_t outsize = 0;
+	out = srx_ReplaceExt( R, mstNNT, mstlen, repNNT, replen, &outsize );
+	RX_ASSERT( out && outsize );
+	printf( " => [%d] '%s'\n", (int) outsize, out );
+	RX_ASSERT( outsize == reslen );
+	RX_ASSERT( memcmp( out, res, reslen ) == 0 );
+	srx_FreeReplaced( R, out );
+	
+	if( flags & TEST_DUMP )
+	{
+		srx_DumpToStdout( R );
+		puts("");
+	}
+	srx_Destroy( R );
+	
+	free( mstNNT );
+	free( patNNT );
+	free( repNNT );
+}
+#define REPTEST( mst, pat, rep, res ) reptest_ext( mst, pat, NULL, rep, res )
+#define REPTEST2( mst, pat, mod, rep, res ) reptest_ext( mst, pat, mod, rep, res )
+
 
 int main()
 {
@@ -533,6 +575,19 @@ int main()
 	}
 	puts( "" );
 	
+	puts( "=== some escaped special chars ===" );
+	{
+		rxInstr instrs[] =
+		{
+			{ RX_OP_CAPTURE_START, 0, 0, 0 },
+			{ RX_OP_MATCH_STRING, 0, 0, 1 },
+			{ RX_OP_CAPTURE_END, 0, 0, 0 },
+			{ RX_OP_MATCH_DONE, 0, 0, 0 },
+		};
+		RX_ASSERT( rxCompTest2( "\\.", "m", instrs, 4, "." ) == RXSUCCESS );
+	}
+	puts( "" );
+	
 	puts( "##### REGEX USAGE tests #####" );
 	
 	printf( "\n> compilation tests\n\n" );
@@ -544,7 +599,10 @@ int main()
 	COMPTEST( "*", RXEUNEXP );
 	COMPTEST( "(a)", RXSUCCESS );
 	COMPTEST( "(.)(.)", RXSUCCESS );
+	COMPTEST( "a)", RXEUNEXP );
 	COMPTEST( "a{1,2}", RXSUCCESS );
+	COMPTEST( "a{1,}", RXSUCCESS );
+	COMPTEST( "a{1}", RXSUCCESS );
 	COMPTEST( "5*?", RXSUCCESS );
 	COMPTEST( ".*?", RXSUCCESS );
 	COMPTEST( "^.*X.*$", RXSUCCESS );
@@ -552,24 +610,26 @@ int main()
 	COMPTEST( "[-z]", RXSUCCESS );
 	COMPTEST( "[a-]", RXSUCCESS );
 	COMPTEST( "[^]z]", RXSUCCESS );
-	/* COMPTEST( "|b" );
-	COMPTEST( "a|" );
+	COMPTEST( "|b", RXEUNEXP );
+	COMPTEST( "a|", RXEPART );
 	COMPTEST( "a|b", RXSUCCESS );
+	COMPTEST( "a|b|c", RXSUCCESS );
+	COMPTEST( "a|b|c|d", RXSUCCESS );
 	COMPTEST( "a(b|c)d", RXSUCCESS );
 	COMPTEST( "( [a-z]{2,8}){1,2}", RXSUCCESS );
-	COMPTEST( " |[a-z]{2,8}", RXSUCCESS ); */
+	COMPTEST( " |[a-z]{2,8}", RXSUCCESS );
 	COMPTEST( "<([a-z]+)>.*?<\\1>", RXSUCCESS );
 	
 	printf( "\n> matching tests\n\n" );
 	MATCHTEST( "a cat", " c", 1 );
-	/* MATCHTEST( " in the 2013-01-02...", "[0-9]{4}-[0-9]{2}-[0-9]{2}", 1 );
+	MATCHTEST( " in the 2013-01-02...", "[0-9]{4}-[0-9]{2}-[0-9]{2}", 1 );
 	MATCHTEST( "a cat", "(f|c)at", 1 );
-	MATCHTEST( "a cat", "(f|r)at", 0 ); */
+	MATCHTEST( "a cat", "(f|r)at", 0 );
 	MATCHTEST( "a cat", "a cat", 1 );
 	MATCHTEST( "a cat", "cat$", 1 );
 	MATCHTEST( "a cat", "^cat", 0 );
 	MATCHTEST( "a cat", "^a", 1 );
-	/* MATCHTEST( "captured", "((x(y))|(p))", 1 ); */
+	MATCHTEST( "captured", "((x(y))|(p))", 1 );
 	MATCHTEST( "a cat", ".*", 1 );
 	MATCHTEST( "a cat", ".*?", 1 );
 	MATCHTEST( "<tag> b <tag>", "<([a-z]{1,5})>.*?<\\1>", 1 );
@@ -579,43 +639,39 @@ int main()
 	MATCHTEST( "some *special* text", "\\*.*?\\*", 1 );
 	MATCHTEST( "some *special* text", "\\*(.*?)\\*", 1 );
 	
-	/*
 	MATCHTEST( "The C API has @\xFFseveral functions\xFF\xFDIterators\xFE used to deal with iterators. "
 		"There are essentially three kinds of functions: initialization (@\xFFPushIterator(P)\xFF, "
 		"@\xFFGetIterator(P)\xFF), advancing (@\xFFIterAdvance(P)\xFF) and data retrieval "
 		"(@\xFFIterPushData(P)\xFF, @\xFFIterGetData(P)\xFF).",
-		"(^|[ \xFF\xFC\n\r\t,.])@\xFF([^\xFF\xFD]+)\xFF(\xFD([^\xFE]+)\xFE)?($|[ \xFF\xFC\n\r\t,.])" );
+		"(^|[ \xFF\xFC\n\r\t,.])@\xFF([^\xFF\xFD]+)\xFF(\xFD([^\xFE]+)\xFE)?($|[ \xFF\xFC\n\r\t,.])", 1 );
 	
 	MATCHTEST( "The C API has @\"several functions\"<Iterators> used to deal with iterators. "
 		"There are essentially three kinds of functions: initialization (@\"PushIterator(P)\", "
 		"@\"GetIterator(P)\"), advancing (@\"IterAdvance(P)\") and data retrieval "
 		"(@\"IterPushData(P)\", @\"IterGetData(P)\").",
-		"(^|[ \"'\n\r\t,.])@\"([^\"<]+)\"(<([^>]+)>)?($|[ \"'\n\r\t,.])" );
+		"(^|[ \"'\n\r\t,.])@\"([^\"<]+)\"(<([^>]+)>)?($|[ \"'\n\r\t,.])", 1 );
 	
 	MATCHTEST( " @\"several functions\"<Iterators> ",
-		"@\"([^\"<]+)\"(<([^>]+)>)?($|[ \"'\n\r\t,.])" );
+		"@\"([^\"<]+)\"(<([^>]+)>)?($|[ \"'\n\r\t,.])", 1 );
 	MATCHTEST( " @\"several functions\"<Iterators> ",
-		"@\"([^\"<]+)\"(<([^>]+)>)?($|[ \"'\n\r\t,.])" );
+		"@\"([^\"<]+)\"(<([^>]+)>)?($|[ \"'\n\r\t,.])", 1 );
 	MATCHTEST( " @\"several functions\"<Iterators> ",
-		"(^|[ \"'\n\r\t,.])@\"([^\"<]+)\"(<([^>]+)>)?($|[ \"'\n\r\t,.])" );
+		"(^|[ \"'\n\r\t,.])@\"([^\"<]+)\"(<([^>]+)>)?($|[ \"'\n\r\t,.])", 1 );
 	
 	MATCHTEST( " @\xFFseveral functions\xFF<Iterators> ",
-		"[^\xFF]+\xFF(\xFD[^\xFE]+\xFE)? " );
+		"[^\xFF]+\xFF(\xFD[^\xFE]+\xFE)? ", 0 );
 	MATCHTEST( " @\xFFseveral functions\xFF<Iterators> ",
-		"\xFF([^\xFF]+)\xFF(\xFD([^\xFE]+)\xFE)?($|[ ])" );
+		"\xFF([^\xFF]+)\xFF(\xFD([^\xFE]+)\xFE)?($|[ ])", 0 );
 	MATCHTEST( " @\xFFseveral functions\xFF<Iterators> ",
-		"@\xFF([^\xFF\xFD]+)\xFF(\xFD([^\xFE]+)\xFE)?($|[ \xFF\xFC\n\r\t,.])" );
+		"@\xFF([^\xFF\xFD]+)\xFF(\xFD([^\xFE]+)\xFE)?($|[ \xFF\xFC\n\r\t,.])", 0 );
 	MATCHTEST( " @\xFFseveral functions\xFF<Iterators> ",
-		"@\xFF([^\xFF\xFD]+)\xFF(\xFD([^\xFE]+)\xFE)?($|[ \xFF\xFC\n\r\t,.])" );
+		"@\xFF([^\xFF\xFD]+)\xFF(\xFD([^\xFE]+)\xFE)?($|[ \xFF\xFC\n\r\t,.])", 0 );
 	MATCHTEST( " @\xFFseveral functions\xFF<Iterators> ",
-		"(^|[ \xFF\xFC\n\r\t,.])@\xFF([^\xFF\xFD]+)\xFF(\xFD([^\xFE]+)\xFE)?($|[ \xFF\xFC\n\r\t,.])" );
-	*/
+		"(^|[ \xFF\xFC\n\r\t,.])@\xFF([^\xFF\xFD]+)\xFF(\xFD([^\xFE]+)\xFE)?($|[ \xFF\xFC\n\r\t,.])", 0 );
 	
-	/*
 	printf( "\n> replacement tests\n\n" );
-	REPTEST( "some *special* text", "\\*.*?\\*", "SpEcIaL" );
-	REPTEST( "some *special* text", "\\*(.*?)\\*", "<b>\\1</b>" );
-	*/
+	REPTEST( "some *special* text", "\\*.*?\\*", "SpEcIaL", "some SpEcIaL text" );
+	REPTEST( "some *special* text", "\\*(.*?)\\*", "<b>\\1</b>", "some <b>special</b> text" );
 	
 	printf( "\n> modifier tests\n\n" );
 	/* modifier - 'i' */
@@ -624,7 +680,7 @@ int main()
 	MATCHTEST2( "Cat", "A", "i", 1 );
 	MATCHTEST2( "CAT", "a", "i", 1 );
 	MATCHTEST2( "X", "[a-z]", "i", 1 );
-	REPTEST2( "some text here", "[a-z]+", "i", "\\\\($0)$$" ); */
+	REPTEST2( "some text here", "[a-z]+", "i", "\\\\($0)$$" ); TODO */
 	
 	/* modifier - 's' */
 	COMPTEST2( ".", "s", RXSUCCESS );
@@ -636,6 +692,50 @@ int main()
 	MATCHTEST2( "line 1\nline 2\nline 3", "^line 1$", "m", 1 );
 	MATCHTEST2( "line 1\nline 2\nline 3", "^line 2$", "m", 1 );
 	MATCHTEST2( "line 1\nline 2\nline 3", "^line 3$", "m", 1 );
+	
+	/* new features */
+	printf( "\n> feature tests\n\n" );
+	REPTEST( "test 55 cc", "\\d+", "+", "test + cc" );
+	/* REPTEST( "test 66 cc", "[\\d]+", "!", "test ! cc" ); TODO */
+	REPTEST( "aasd 453 dasf78adsf", "\\w+", "[word:$0]", "[word:aasd] [word:453] [word:dasf78adsf]" );
+	REPTEST( "abc 234\tdef1", "\\H+", "[not-hspace:$0]", "[not-hspace:abc] [not-hspace:234]\t[not-hspace:def1]" );
+	
+	/* random test cases (bugs and such) */
+	printf( "\n> bug tests\n\n" );
+	MATCHTEST2( "something great", "([a-z]+)thing", "i", 1 );
+	MATCHTEST2( " great", "([a-z]+)thing", "i", 0 );
+	REPTEST2( "something great", "([a-z]+)thing", "i", "$1what", "somewhat great" );
+	
+	REPTEST( "`if/else`, `while`, `for`, `do/while`, `foreach`",
+		"(^|[ \n\r\t,.])`([^`]+)`($|[ \n\r\t,.])", "$1##$2##$3",
+		"##if/else##, ##while##, ##for##, ##do/while##, ##foreach##" );
+	
+	MATCHTEST( "|  add                    |`   A  +  B    `|   arithmetic   |  no    |   2   |", "(`.*)\\|(.*`)", 0 );
+	
+	REPTEST( "SGScript API", "[^a-zA-Z0-9]+", "-", "SGScript-API" );
+	
+#define RX0 "(^\\+[0-9]{2}|^\\+[0-9]{2}\\(0\\)|^\\(\\+[0-9]{2}\\)\\(0\\)|^00[0-9]{2}|^0)([0-9]{9}$|[- 0-9]{10}$)"
+	MATCHTEST( "+31235256677", RX0, 1 );
+	MATCHTEST( "+31(0)235256677", RX0, 1 );
+	MATCHTEST( "023-5256677", RX0, 1 );
+#define RX1 "^\\$(\\d{1,3}(\\,\\d{3})*|(\\d+))(\\.\\d{2})?$"
+	MATCHTEST( "$0.84", RX1, 1 );
+	MATCHTEST( "$123458", RX1, 1 );
+	MATCHTEST( "$1,234.89", RX1, 1 );
+	MATCHTEST( "$123,456.89", RX1, 1 );
+	MATCHTEST( "$1,234,567.89", RX1, 1 );
+#define RX2 "^A(BX)*C$"
+	MATCHTEST( "AC", RX2, 1 );
+	MATCHTEST( "ABXC", RX2, 1 );
+	MATCHTEST( "ABXBXC", RX2, 1 );
+	
+	MATCHTEST( "|`     ! A      `|",
+		"(`.*)!(.*`)", 1 );
+	REPTEST( "|`     ! A      `|",
+		"(`.*)!(.*`)", "$1-~EXCL~-$2",
+		"|`     -~EXCL~- A      `|" );
+	MATCHTEST( " aaa = 0,", "(a+)( +)?,", 0 );
+	MATCHTEST( ", asdf qwe = 0,", " +([a-zA-Z0-9_*& ]+?) +([a-zA-Z0-9_]+)( += +)?,", 0 );
 	
 	puts( "=== all tests done! ===" );
 	

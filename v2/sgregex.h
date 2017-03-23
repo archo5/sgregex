@@ -47,6 +47,7 @@ static void* srx_DefaultMemFunc( void* userdata, void* ptr, size_t size )
 
 
 typedef char rxChar;
+typedef unsigned char rxUChar;
 typedef struct _srx_Context srx_Context;
 
 
