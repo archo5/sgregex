@@ -754,6 +754,16 @@ int main()
 	MATCHTEST( "const char* name, bool* p_open = NULL, ImGuiWindowFlags flags = 0,",
 		" +([a-zA-Z0-9_*& ]+?) +([a-zA-Z0-9_]+)( += +)?,", 1 );
 	
+	REPTEST2( "SGS_PROPERTY float x;", "("
+		"SGS_METHOD_NAMED|SGS_METHOD|"
+		"SGS_STATICMETHOD_NAMED|SGS_STATICMETHOD|"
+		"SGS_PROPERTY_FUNC|SGS_PROPERTY|"
+		"SGS_IFUNC|SGS_GCREF|"
+		"SGS_DUMP|SGS_NODUMP|SGS_BACKING_STORE)"
+		"(.*?)[;\\{]", "ms",
+		"m0='\\0' m1='\\1' m2='\\2'",
+		"m0='SGS_PROPERTY float x;' m1='SGS_PROPERTY' m2=' float x'" );
+	
 	puts( "=== all tests done! ===" );
 	
 	return 0;
